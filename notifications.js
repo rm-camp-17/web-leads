@@ -255,7 +255,7 @@ The Camp Experts Team`;
     const resend = await getResendClient();
     await resend.emails.send({
       from: 'Camp Experts <hey@connections.campexpert.com>',
-      reply_to: 'hey@campexperts.com',
+      reply_to: ['riley@campexperts.com', 'hey@campexperts.com'],
       to: email,
       subject: `We've got you covered, ${name}`,
       text,
@@ -302,7 +302,7 @@ The Camp Experts Team`;
     const resend = await getResendClient();
     await resend.emails.send({
       from: 'Camp Experts <hey@connections.campexpert.com>',
-      reply_to: 'hey@campexperts.com',
+      reply_to: ['riley@campexperts.com', 'hey@campexperts.com'],
       to: email,
       subject: `We're here whenever you're ready`,
       text,
