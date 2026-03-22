@@ -1,30 +1,27 @@
+const { ReplitConnectors } = require('@replit/connectors-sdk');
 const { HUBSPOT_CHILD_OBJECT_ID, HUBSPOT_HOUSEHOLD_OBJECT_ID } = require('./routing-config');
 
-const BASE_URL = 'https://api.hubapi.com';
-
-function headers() {
-  return {
-    Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
-    'Content-Type': 'application/json',
-  };
-}
+const connectors = new ReplitConnectors();
 
 async function hubspotFetch(path, options = {}) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { ...headers(), ...options.headers },
-  });
+  const method = options.method || 'GET';
+  const fetchOptions = { method };
+
+  if (options.body) {
+    fetchOptions.body = options.body;
+    fetchOptions.headers = { 'Content-Type': 'application/json' };
+  }
+
+  const res = await connectors.proxy("hubspot", path, fetchOptions);
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`HubSpot API ${options.method || 'GET'} ${path} → ${res.status}: ${body}`);
+    throw new Error(`HubSpot API ${method} ${path} → ${res.status}: ${body}`);
   }
 
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
-
-// ── Contact Search ──
 
 async function searchContactByEmail(email) {
   const data = await hubspotFetch('/crm/v3/objects/contacts/search', {
@@ -52,8 +49,6 @@ async function searchContactByPhone(phone) {
   return data.results?.[0] || null;
 }
 
-// ── Contact CRUD ──
-
 async function createContact({ firstName, lastName, email, phone }) {
   const properties = {
     email,
@@ -80,8 +75,6 @@ async function updateContact(contactId, properties) {
 async function setContactOwner(contactId, ownerId) {
   return updateContact(contactId, { hubspot_owner_id: ownerId });
 }
-
-// ── Child Custom Object ──
 
 async function createChild({ firstName, lastName, birthDate, gender, interestedYear, budget, sessionLength }) {
   const properties = {
@@ -114,37 +107,32 @@ async function associateChildWithContact(childId, contactId) {
   );
 }
 
-// ── Deals ──
-
 async function createDeal({ contactId, ownerId, familyName }) {
   const deal = await hubspotFetch('/crm/v3/objects/deals', {
     method: 'POST',
     body: JSON.stringify({
       properties: {
         dealname: `New Lead - ${familyName}`,
-        dealstage: 'appointmentscheduled', // "New Lead" stage — adjust pipeline stage ID as needed
+        dealstage: 'appointmentscheduled',
         hubspot_owner_id: ownerId,
         pipeline: 'default',
       },
     }),
   });
 
-  // Associate deal with contact
   await hubspotFetch(
     `/crm/v4/objects/deals/${deal.id}/associations/contacts/${contactId}`,
     {
       method: 'PUT',
       body: JSON.stringify([{
         associationCategory: 'HUBSPOT_DEFINED',
-        associationTypeId: 3, // deal_to_contact
+        associationTypeId: 3,
       }]),
     }
   );
 
   return deal;
 }
-
-// ── Deals for Existing Family Check ──
 
 async function getContactDeals(contactId) {
   const data = await hubspotFetch(
@@ -160,8 +148,6 @@ async function getDeal(dealId) {
   });
   return data;
 }
-
-// ── Household Associations ──
 
 async function getContactHouseholds(contactId) {
   try {

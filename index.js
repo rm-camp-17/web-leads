@@ -1,7 +1,7 @@
 const express = require('express');
 const { normalizeFields, isDetailedForm, extractChildren } = require('./field-normalizer');
 const hubspot = require('./hubspot');
-const sb = require('./supabase');
+const sb = require('./db');
 const { routeLead } = require('./routing-engine');
 const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp } = require('./notifications');
 const { sendExpertSms } = require('./sms');
@@ -351,6 +351,15 @@ setInterval(async () => {
 
 // ── Start Server ──
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Camp Experts Lead Routing Engine running on port ${PORT}`);
+
+async function start() {
+  await sb.initDatabase();
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Camp Experts Lead Routing Engine running on port ${PORT}`);
+  });
+}
+
+start().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

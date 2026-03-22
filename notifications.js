@@ -2,9 +2,40 @@ const { Resend } = require('resend');
 const Anthropic = require('@anthropic-ai/sdk');
 const { EXPERTS } = require('./routing-config');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+async function getResendCredentials() {
+  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
+  const xReplitToken = process.env.REPL_IDENTITY
+    ? 'repl ' + process.env.REPL_IDENTITY
+    : process.env.WEB_REPL_RENEWAL
+    ? 'depl ' + process.env.WEB_REPL_RENEWAL
+    : null;
 
-// ── AI Personalization ──
+  if (!xReplitToken || !hostname) {
+    throw new Error('Replit connector token not found');
+  }
+
+  const res = await fetch(
+    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=resend',
+    {
+      headers: {
+        'Accept': 'application/json',
+        'X-Replit-Token': xReplitToken,
+      },
+    }
+  );
+  const data = await res.json();
+  const connection = data.items?.[0];
+
+  if (!connection || !connection.settings.api_key) {
+    throw new Error('Resend not connected');
+  }
+  return { apiKey: connection.settings.api_key, fromEmail: connection.settings.from_email };
+}
+
+async function getResendClient() {
+  const { apiKey } = await getResendCredentials();
+  return new Resend(apiKey);
+}
 
 let anthropic;
 try {
@@ -12,14 +43,12 @@ try {
     anthropic = new Anthropic();
   }
 } catch {
-  // SDK not available or key not set — personalization will fall back to description as-is
 }
 
 async function generatePersonalNote(description) {
   if (!description || !description.trim()) return null;
 
   if (!anthropic) {
-    // No API key — return the raw description as the personal note
     return description.trim();
   }
 
@@ -43,8 +72,6 @@ Write 1-2 short sentences summarizing what this family is looking for, in a warm
   }
 }
 
-// ── Expert Notification (with returning family + personalization) ──
-
 async function sendExpertNotification({ expertOwnerId, lead, children, isReturningFamily }) {
   const expert = EXPERTS[expertOwnerId];
   if (!expert) {
@@ -55,7 +82,6 @@ async function sendExpertNotification({ expertOwnerId, lead, children, isReturni
   const familyName = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Unknown';
   const location = lead.zip || lead.country || 'Not provided';
 
-  // Generate personalized note from description
   const personalNote = await generatePersonalNote(lead.description);
 
   let childDetails = 'None provided';
@@ -136,6 +162,7 @@ ${children.map((child, i) => {
 `;
 
   try {
+    const resend = await getResendClient();
     await resend.emails.send({
       from: 'Camp Experts <office@campexperts.com>',
       to: expert.email,
@@ -148,8 +175,6 @@ ${children.map((child, i) => {
     console.error(`Failed to send notification to ${expert.email}:`, err.message);
   }
 }
-
-// ── Family Acknowledgment Email ──
 
 async function sendFamilyAcknowledgment({ email, firstName, expertName }) {
   const name = firstName || 'there';
@@ -183,6 +208,7 @@ Warm regards,
 The Camp Experts Team`;
 
   try {
+    const resend = await getResendClient();
     await resend.emails.send({
       from: 'Camp Experts <hey@campexperts.com>',
       to: email,
@@ -195,8 +221,6 @@ The Camp Experts Team`;
     console.error(`Failed to send family acknowledgment to ${email}:`, err.message);
   }
 }
-
-// ── Timeout Follow-Up Email ──
 
 async function sendTimeoutFollowUp({ email, firstName }) {
   const name = firstName || 'there';
@@ -230,6 +254,7 @@ Warmly,
 The Camp Experts Team`;
 
   try {
+    const resend = await getResendClient();
     await resend.emails.send({
       from: 'Camp Experts <hey@campexperts.com>',
       to: email,
@@ -242,8 +267,6 @@ The Camp Experts Team`;
     console.error(`Failed to send timeout follow-up to ${email}:`, err.message);
   }
 }
-
-// ── Helpers ──
 
 function calculateAge(birthDateStr) {
   const birth = new Date(birthDateStr);

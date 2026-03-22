@@ -1,5 +1,5 @@
 const hubspot = require('./hubspot');
-const supabase = require('./supabase');
+const supabase = require('./db');
 const config = require('./routing-config');
 
 // Main entry point: takes a normalized lead, returns { expertId, rule }
