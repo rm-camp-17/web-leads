@@ -26,7 +26,7 @@ function formatChildLine(child) {
   return parts.join(', ');
 }
 
-async function sendExpertSms({ expertOwnerId, familyName, phone, location, isReturningFamily, children, email }) {
+async function sendExpertSms({ expertOwnerId, familyName, phone, city, zip, country, isReturningFamily, children, email }) {
   const expert = EXPERTS[expertOwnerId];
   if (!expert || !expert.phone) {
     console.log(`[sms] No phone number for expert ${expertOwnerId}, skipping SMS`);
@@ -56,7 +56,8 @@ async function sendExpertSms({ expertOwnerId, familyName, phone, location, isRet
   lines.push(`Parent: ${familyName}`);
   if (phone) lines.push(`Phone: ${phone}`);
   if (email) lines.push(`Email: ${email}`);
-  if (location) lines.push(`Location: ${location}`);
+  const locationParts = [city, zip, country].filter(Boolean);
+  if (locationParts.length) lines.push(`Location: ${locationParts.join(', ')}`);
   lines.push('');
 
   if (children && children.length > 0) {
