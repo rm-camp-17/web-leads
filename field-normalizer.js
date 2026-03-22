@@ -89,4 +89,17 @@ function extractChildren(payload) {
   return children;
 }
 
-module.exports = { normalizeFields, isDetailedForm, extractChildren };
+// Budget string → numeric value for HubSpot
+const BUDGET_MAP = {
+  '$': '1500',
+  '$$': '2500',
+  '$$$': '3500',
+};
+
+function mapBudget(value) {
+  if (!value) return '';
+  const mapped = BUDGET_MAP[value.trim()];
+  return mapped || value; // Pass through if already numeric
+}
+
+module.exports = { normalizeFields, isDetailedForm, extractChildren, mapBudget };
