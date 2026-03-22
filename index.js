@@ -349,6 +349,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       email,
       firstName: normalized.first_name,
       expertName: expert?.name || 'Camp Experts',
+      expertEmail: expert?.email,
     }),
 
     sb.logAssignment({

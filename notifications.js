@@ -220,7 +220,7 @@ ${children.map((child, i) => {
   }
 }
 
-async function sendFamilyAcknowledgment({ email, firstName, expertName }) {
+async function sendFamilyAcknowledgment({ email, firstName, expertName, expertEmail }) {
   const name = firstName || 'there';
 
   const html = `
@@ -255,19 +255,20 @@ The Camp Experts Team`;
     const resend = await getResendClient();
     await resend.emails.send({
       from: 'Camp Experts <hey@connections.campexpert.com>',
-      reply_to: ['riley@campexperts.com', 'hey@campexperts.com'],
+      reply_to: expertEmail || 'riley@campexperts.com',
       to: email,
+      cc: expertEmail ? [expertEmail] : [],
       subject: `We've got you covered, ${name}`,
       text,
       html,
     });
-    console.log(`Family acknowledgment sent to ${email}`);
+    console.log(`Family acknowledgment sent to ${email} (cc: ${expertEmail || 'none'})`);
   } catch (err) {
     console.error(`Failed to send family acknowledgment to ${email}:`, err.message);
   }
 }
 
-async function sendTimeoutFollowUp({ email, firstName }) {
+async function sendTimeoutFollowUp({ email, firstName, expertEmail }) {
   const name = firstName || 'there';
 
   const html = `
@@ -302,13 +303,14 @@ The Camp Experts Team`;
     const resend = await getResendClient();
     await resend.emails.send({
       from: 'Camp Experts <hey@connections.campexpert.com>',
-      reply_to: ['riley@campexperts.com', 'hey@campexperts.com'],
+      reply_to: expertEmail || 'riley@campexperts.com',
       to: email,
+      cc: expertEmail ? [expertEmail] : [],
       subject: `We're here whenever you're ready`,
       text,
       html,
     });
-    console.log(`Timeout follow-up sent to ${email}`);
+    console.log(`Timeout follow-up sent to ${email} (cc: ${expertEmail || 'none'})`);
   } catch (err) {
     console.error(`Failed to send timeout follow-up to ${email}:`, err.message);
   }
