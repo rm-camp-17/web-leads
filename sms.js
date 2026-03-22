@@ -2,7 +2,7 @@ const { EXPERTS } = require('./routing-config');
 
 const QUO_API_URL = 'https://api.openphone.com/v1/messages';
 const QUO_API_KEY = process.env.QUO_API_KEY;
-const QUO_FROM_NUMBER = process.env.QUO_FROM_NUMBER || '+12122887892';
+const QUO_FROM_PHONE_NUMBER_ID = process.env.QUO_FROM_NUMBER || '';
 
 async function sendExpertSms({ expertOwnerId, familyName, location, isReturningFamily, childrenCount, email }) {
   const expert = EXPERTS[expertOwnerId];
@@ -13,6 +13,11 @@ async function sendExpertSms({ expertOwnerId, familyName, location, isReturningF
 
   if (!QUO_API_KEY) {
     console.log('[sms] Quo not configured (missing QUO_API_KEY), skipping SMS');
+    return;
+  }
+
+  if (!QUO_FROM_PHONE_NUMBER_ID) {
+    console.log('[sms] Quo not configured (missing QUO_FROM_NUMBER), skipping SMS');
     return;
   }
 
@@ -29,7 +34,7 @@ async function sendExpertSms({ expertOwnerId, familyName, location, isReturningF
   lines.push('Full details in your email.');
   const body = lines.join('\n');
 
-  console.log(`[sms] Attempting to send from ${QUO_FROM_NUMBER} to ${expert.phone}`);
+  console.log(`[sms] Attempting to send from ${QUO_FROM_PHONE_NUMBER_ID} to ${expert.phone}`);
   try {
     const res = await fetch(QUO_API_URL, {
       method: 'POST',
@@ -39,7 +44,7 @@ async function sendExpertSms({ expertOwnerId, familyName, location, isReturningF
       },
       body: JSON.stringify({
         content: body,
-        from: QUO_FROM_NUMBER,
+        from: QUO_FROM_PHONE_NUMBER_ID,
         to: [expert.phone],
       }),
     });
