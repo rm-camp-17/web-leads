@@ -4,6 +4,7 @@ const hubspot = require('./hubspot');
 const sb = require('./supabase');
 const { routeLead } = require('./routing-engine');
 const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp } = require('./notifications');
+const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
 
 const app = express();
@@ -201,6 +202,14 @@ async function handleDetailedForm(normalized, rawPayload) {
       isReturningFamily,
     }),
 
+    // SMS alert to expert's phone
+    sendExpertSms({
+      expertOwnerId: routingResult.expertId,
+      familyName,
+      location: normalized.zip || normalized.country || 'Unknown',
+      isReturningFamily,
+    }),
+
     // Family acknowledgment — let them know their expert by name
     sendFamilyAcknowledgment({
       email,
@@ -262,6 +271,13 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
         expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
         lead: normalized,
         children: [],
+      }),
+
+      // Text the office
+      sendExpertSms({
+        expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
+        familyName: `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email,
+        location: normalized.zip || normalized.country || 'Unknown',
       }),
 
       sb.logAssignment({
