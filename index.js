@@ -342,6 +342,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       isReturningFamily,
       children,
       email,
+      description: normalized.description,
     }),
 
     sendFamilyAcknowledgment({
@@ -406,6 +407,7 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
         country: normalized.country,
         children: [],
         email,
+        description: normalized.description,
       }),
 
       sb.logAssignment({
