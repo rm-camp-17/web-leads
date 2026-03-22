@@ -15,7 +15,7 @@ app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'Camp Experts Lead Routing Engine' });
 });
 
-// ── Main Webhook Endpoint ──
+// ── Main Webhook Endpoint (lead forms) ──
 app.post('/api/webhook/webflow-lead', async (req, res) => {
   try {
     const rawPayload = req.body;
@@ -38,6 +38,24 @@ app.post('/api/webhook/webflow-lead', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[webhook] Error:', err.message, err.stack);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── Internal Form Webhook (team applications, contact forms, email signups) ──
+// Forwards submission directly to Riley via email
+app.post('/api/webhook/webflow-internal', async (req, res) => {
+  try {
+    const rawPayload = req.body;
+    const formName = rawPayload._formName || 'Unknown Form';
+    console.log(`[internal-form] Received "${formName}" submission:`, JSON.stringify(rawPayload));
+
+    const { sendInternalFormNotification } = require('./notifications');
+    await sendInternalFormNotification({ formName, payload: rawPayload });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[internal-form] Error:', err.message, err.stack);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

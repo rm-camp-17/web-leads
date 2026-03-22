@@ -331,8 +331,57 @@ function esc(str) {
     .replace(/"/g, '&quot;');
 }
 
+// Forward internal form submissions (team applications, contact forms, etc.) to Riley
+const RILEY_EMAIL = 'riley@campexperts.com';
+
+async function sendInternalFormNotification({ formName, payload }) {
+  // Skip internal/attribution fields
+  const skipKeys = ['_formName', 'source_url', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'referrer'];
+
+  const fields = Object.entries(payload)
+    .filter(([key]) => !skipKeys.includes(key))
+    .filter(([, value]) => value && String(value).trim());
+
+  if (fields.length === 0) {
+    console.log(`[internal-form] Empty submission for "${formName}", skipping`);
+    return;
+  }
+
+  const subject = `${formName}: New Submission`;
+
+  const textRows = fields.map(([key, value]) => `${key}: ${value}`).join('\n');
+  const text = `New submission from "${formName}":\n\n${textRows}\n\nSource: ${payload.source_url || 'N/A'}`;
+
+  const htmlRows = fields.map(([key, value]) =>
+    `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;vertical-align:top;">${esc(key)}:</td><td>${esc(String(value))}</td></tr>`
+  ).join('');
+
+  const html = `
+<h2>${esc(formName)}: New Submission</h2>
+<table style="border-collapse:collapse;font-family:Arial,sans-serif;">
+  ${htmlRows}
+</table>
+${payload.source_url ? `<p style="color:#666;font-size:12px;margin-top:16px;">Submitted from: ${esc(payload.source_url)}</p>` : ''}
+`;
+
+  try {
+    const resend = await getResendClient();
+    await resend.emails.send({
+      from: 'Camp Experts <office@campexperts.com>',
+      to: RILEY_EMAIL,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[internal-form] "${formName}" forwarded to ${RILEY_EMAIL}`);
+  } catch (err) {
+    console.error(`[internal-form] Failed to send "${formName}" to ${RILEY_EMAIL}:`, err.message);
+  }
+}
+
 module.exports = {
   sendExpertNotification,
   sendFamilyAcknowledgment,
   sendTimeoutFollowUp,
+  sendInternalFormNotification,
 };
