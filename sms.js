@@ -42,7 +42,7 @@ async function getTwilioCredentials() {
   };
 }
 
-async function sendExpertSms({ expertOwnerId, familyName, location, isReturningFamily }) {
+async function sendExpertSms({ expertOwnerId, familyName, location, isReturningFamily, childrenCount, email }) {
   const expert = EXPERTS[expertOwnerId];
   if (!expert || !expert.phone) {
     console.log(`[sms] No phone number for expert ${expertOwnerId}, skipping SMS`);
@@ -65,8 +65,18 @@ async function sendExpertSms({ expertOwnerId, familyName, location, isReturningF
   const client = twilio(creds.apiKey, creds.apiKeySecret, { accountSid: creds.accountSid });
   const fromNumber = creds.phoneNumber;
 
-  const prefix = isReturningFamily ? 'Returning family' : 'New lead';
-  const body = `${prefix}: ${familyName} (${location}). Check your email for details.`;
+  const lines = [];
+  if (isReturningFamily) {
+    lines.push(`🔁 Returning Family: ${familyName}`);
+  } else {
+    lines.push(`🏕️ New Lead: ${familyName}`);
+  }
+  lines.push(`📍 ${location}`);
+  if (childrenCount) lines.push(`👧 ${childrenCount} ${childrenCount === 1 ? 'child' : 'children'}`);
+  if (email) lines.push(`✉️ ${email}`);
+  lines.push('');
+  lines.push('Full details in your email.');
+  const body = lines.join('\n');
 
   console.log(`[sms] Attempting to send from ${fromNumber} to ${expert.phone}`);
   try {

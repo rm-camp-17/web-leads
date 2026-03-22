@@ -337,6 +337,8 @@ async function handleDetailedForm(normalized, rawPayload) {
       familyName,
       location: normalized.zip || normalized.country || 'Unknown',
       isReturningFamily,
+      childrenCount: children.length,
+      email,
     }),
 
     sendFamilyAcknowledgment({
@@ -396,6 +398,8 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
         expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
         familyName,
         location: normalized.zip || normalized.country || 'Unknown',
+        childrenCount: 0,
+        email,
       }),
 
       sb.logAssignment({
