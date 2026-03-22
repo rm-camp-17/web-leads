@@ -335,10 +335,14 @@ async function handleDetailedForm(normalized, rawPayload) {
     sendExpertSms({
       expertOwnerId: routingResult.expertId,
       familyName,
-      location: normalized.zip || normalized.country || 'Unknown',
+      phone: normalized.phone,
+      city: normalized.city,
+      zip: normalized.zip,
+      country: normalized.country,
       isReturningFamily,
-      childrenCount: children.length,
+      children,
       email,
+      description: normalized.description,
     }),
 
     sendFamilyAcknowledgment({
@@ -397,9 +401,13 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
       sendExpertSms({
         expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
         familyName,
-        location: normalized.zip || normalized.country || 'Unknown',
-        childrenCount: 0,
+        phone: normalized.phone,
+        city: normalized.city,
+        zip: normalized.zip,
+        country: normalized.country,
+        children: [],
         email,
+        description: normalized.description,
       }),
 
       sb.logAssignment({
