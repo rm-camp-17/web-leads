@@ -14,6 +14,11 @@ try {
 
 async function routeLead(lead) {
   try {
+    if (process.env.TEST_MODE === 'true') {
+      console.log('[routing] TEST_MODE active — routing to Riley via Office ID');
+      return { expertId: config.CAMP_EXPERTS_OFFICE_ID, rule: 'test_mode_override' };
+    }
+
     const existingResult = await checkExistingFamily(lead.email, lead.phone);
     if (existingResult) return existingResult;
 

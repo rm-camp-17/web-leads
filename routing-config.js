@@ -52,6 +52,10 @@ const EXPERTS = {
   '86362403': { name: 'Camp Experts Office', email: 'office@campexperts.com', phone: '+12122887892' },
 };
 
+if (process.env.TEST_MODE === 'true') {
+  EXPERTS['86362403'] = { name: 'Riley (Test Mode)', email: 'riley@campexperts.com', phone: '+19124141215' };
+}
+
 // Owner IDs to exclude from "existing family" matching
 const EXCLUDED_OWNER_IDS = ['86337614', '86362403']; // Sam Goldberg / S'More Hires, Camp Experts Office
 

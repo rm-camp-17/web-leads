@@ -106,7 +106,9 @@ async function createHousehold({ householdId, familyName, email, phone, zip, cou
   if (email) properties.emailaddress = email;
   if (phone) properties.cellnumber = phone;
   if (zip) properties.zip = zip;
-  if (country) properties.state___country__if_int_l_ = country;
+  if (country && !['Usa', 'USA', 'Us'].includes(country)) {
+    properties.state___country__if_int_l_ = country;
+  }
   if (numChildren) properties.num_children = String(numChildren);
   if (ownerId) properties.hubspot_owner_id = ownerId;
 
@@ -126,16 +128,16 @@ async function updateHousehold(householdRecordId, properties) {
 }
 
 async function createChild({ firstName, lastName, birthDate, gender, interestedYear, budget, sessionLength, age, ownerId }) {
+  const childId = `CH_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const properties = {
+    child_id: childId,
     first_name: firstName || '',
     last_name: lastName || '',
   };
   if (birthDate) properties.dob = birthDate;
   if (age !== undefined && age !== null) properties.age = String(age);
-  if (gender) properties.gender = gender;
-  if (interestedYear) properties.interested_year = interestedYear;
+  if (gender) properties.gender = gender.toLowerCase();
   if (budget) properties.budget_per_week = budget;
-  if (sessionLength) properties.session_length = sessionLength;
   if (ownerId) properties.hubspot_owner_id = ownerId;
 
   const data = await hubspotFetch(`/crm/v3/objects/${HUBSPOT_CHILD_OBJECT_ID}`, {
@@ -159,7 +161,7 @@ async function associateObjects(fromObjectType, fromId, toObjectType, toId, asso
 }
 
 async function associateChildWithContact(childId, contactId) {
-  await associateObjects(HUBSPOT_CHILD_OBJECT_ID, childId, 'contacts', contactId, 78);
+  await associateObjects('contacts', contactId, HUBSPOT_CHILD_OBJECT_ID, childId, 78);
 }
 
 async function associateContactWithHousehold(contactId, householdId) {

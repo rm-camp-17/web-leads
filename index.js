@@ -1,5 +1,9 @@
 const express = require('express');
-const { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource } = require('./field-normalizer');
+const { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource, normalizeCountry } = require('./field-normalizer');
+
+function isDomesticCountry(c) {
+  return !c || ['Usa', 'USA', 'Us', 'us', 'usa'].includes(c);
+}
 const hubspot = require('./hubspot');
 const sb = require('./db');
 const { routeLead } = require('./routing-engine');
@@ -19,7 +23,9 @@ app.post('/api/webhook/webflow-lead', async (req, res) => {
     const rawPayload = req.body;
     console.log('[webhook] Received payload:', JSON.stringify(rawPayload));
 
-    const normalized = normalizeFields(rawPayload);
+    const formData = rawPayload.data || rawPayload;
+    const normalized = normalizeFields(formData);
+    if (normalized.country) normalized.country = normalizeCountry(normalized.country);
     const email = (normalized.email || '').toLowerCase();
 
     if (!email) {
@@ -28,9 +34,9 @@ app.post('/api/webhook/webflow-lead', async (req, res) => {
     }
 
     if (isDetailedForm(normalized)) {
-      await handleDetailedForm(normalized, rawPayload);
+      await handleDetailedForm(normalized, formData);
     } else {
-      await handleShortForm(normalized, rawPayload);
+      await handleShortForm(normalized, formData);
     }
 
     res.json({ success: true });
@@ -218,12 +224,13 @@ async function handleDetailedForm(normalized, rawPayload) {
 
   if (householdRecordId) {
     try {
-      await hubspot.updateHousehold(householdRecordId, {
+      const hhUpdate = {
         zip: normalized.zip || undefined,
-        state___country__if_int_l_: normalized.country || undefined,
         num_children: children.length ? String(children.length) : undefined,
         hubspot_owner_id: routingResult.expertId,
-      });
+      };
+      if (!isDomesticCountry(normalized.country)) hhUpdate.state___country__if_int_l_ = normalized.country;
+      await hubspot.updateHousehold(householdRecordId, hhUpdate);
       console.log(`[detailed-form] Updated Household ${householdRecordId}`);
     } catch (err) {
       console.error(`[detailed-form] Error updating household:`, err.message);
@@ -234,12 +241,13 @@ async function handleDetailedForm(normalized, rawPayload) {
       if (existingHousehold) {
         householdRecordId = existingHousehold.id;
         console.log(`[detailed-form] Found existing Household ${householdRecordId}`);
-        await hubspot.updateHousehold(householdRecordId, {
+        const hhUpdate2 = {
           zip: normalized.zip || undefined,
-          state___country__if_int_l_: normalized.country || undefined,
           num_children: children.length ? String(children.length) : undefined,
           hubspot_owner_id: routingResult.expertId,
-        });
+        };
+        if (!isDomesticCountry(normalized.country)) hhUpdate2.state___country__if_int_l_ = normalized.country;
+        await hubspot.updateHousehold(householdRecordId, hhUpdate2);
       } else {
         const householdId = `WF_${Date.now()}`;
         const household = await hubspot.createHousehold({
@@ -272,7 +280,7 @@ async function handleDetailedForm(normalized, rawPayload) {
 
   const childDealPromises = children.map(async (child) => {
     try {
-      const budget = mapBudget(child.budget_per_week);
+      const budget = child.budget_per_week || '';
       const age = child.birth_date ? calculateAge(child.birth_date) : null;
       const year = child.interested_year || new Date().getFullYear().toString();
 

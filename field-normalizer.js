@@ -168,4 +168,26 @@ function extractLeadSource(payload) {
   return source;
 }
 
-module.exports = { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource };
+const COUNTRY_MAP = {
+  'united states': 'Usa',
+  'united states of america': 'Usa',
+  'us': 'Usa',
+  'u.s.': 'Usa',
+  'u.s.a.': 'Usa',
+  'america': 'Usa',
+  'usa': 'Usa',
+  'united kingdom': 'UK',
+  'great britain': 'UK',
+  'england': 'UK',
+  'scotland': 'UK',
+  'wales': 'UK',
+  'northern ireland': 'UK',
+};
+
+function normalizeCountry(value) {
+  if (!value) return value;
+  const lower = value.trim().toLowerCase();
+  return COUNTRY_MAP[lower] || value.trim();
+}
+
+module.exports = { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource, normalizeCountry };
