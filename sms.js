@@ -1,46 +1,8 @@
-const twilio = require('twilio');
 const { EXPERTS } = require('./routing-config');
 
-async function getTwilioCredentials() {
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY
-    ? 'repl ' + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-    ? 'depl ' + process.env.WEB_REPL_RENEWAL
-    : null;
-
-  if (!xReplitToken || !hostname) {
-    return null;
-  }
-
-  const res = await fetch(
-    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=twilio',
-    {
-      headers: {
-        'Accept': 'application/json',
-        'X-Replit-Token': xReplitToken,
-      },
-    }
-  );
-
-  if (!res.ok) {
-    throw new Error(`Twilio connector API returned ${res.status}`);
-  }
-
-  const data = await res.json();
-  const connection = data.items?.[0];
-
-  if (!connection || !connection.settings.account_sid || !connection.settings.api_key || !connection.settings.api_key_secret) {
-    return null;
-  }
-
-  return {
-    accountSid: connection.settings.account_sid,
-    apiKey: connection.settings.api_key,
-    apiKeySecret: connection.settings.api_key_secret,
-    phoneNumber: connection.settings.phone_number,
-  };
-}
+const QUO_API_URL = 'https://api.openphone.com/v1/messages';
+const QUO_API_KEY = process.env.QUO_API_KEY;
+const QUO_FROM_NUMBER = process.env.QUO_FROM_NUMBER || '+12122887892';
 
 async function sendExpertSms({ expertOwnerId, familyName, location, isReturningFamily, childrenCount, email }) {
   const expert = EXPERTS[expertOwnerId];
@@ -49,21 +11,10 @@ async function sendExpertSms({ expertOwnerId, familyName, location, isReturningF
     return;
   }
 
-  let creds;
-  try {
-    creds = await getTwilioCredentials();
-  } catch (err) {
-    console.log('[sms] Twilio not configured, skipping SMS:', err.message);
+  if (!QUO_API_KEY) {
+    console.log('[sms] Quo not configured (missing QUO_API_KEY), skipping SMS');
     return;
   }
-
-  if (!creds) {
-    console.log('[sms] Twilio not configured, skipping SMS');
-    return;
-  }
-
-  const client = twilio(creds.apiKey, creds.apiKeySecret, { accountSid: creds.accountSid });
-  const fromNumber = creds.phoneNumber;
 
   const lines = [];
   if (isReturningFamily) {
@@ -78,17 +29,30 @@ async function sendExpertSms({ expertOwnerId, familyName, location, isReturningF
   lines.push('Full details in your email.');
   const body = lines.join('\n');
 
-  console.log(`[sms] Attempting to send from ${fromNumber} to ${expert.phone}`);
+  console.log(`[sms] Attempting to send from ${QUO_FROM_NUMBER} to ${expert.phone}`);
   try {
-    const msg = await client.messages.create({
-      body,
-      from: fromNumber,
-      to: expert.phone,
+    const res = await fetch(QUO_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': QUO_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: body,
+        from: QUO_FROM_NUMBER,
+        to: [expert.phone],
+      }),
     });
-    console.log(`[sms] Text sent to ${expert.name} (${expert.phone}) — SID: ${msg.sid}, status: ${msg.status}`);
+
+    if (!res.ok) {
+      const errorBody = await res.text();
+      console.error(`[sms] Quo API returned ${res.status}: ${errorBody}`);
+      return;
+    }
+
+    console.log(`[sms] Text sent to ${expert.name} (${expert.phone}) via Quo`);
   } catch (err) {
     console.error(`[sms] Failed to text ${expert.name}:`, err.message);
-    if (err.code) console.error(`[sms] Twilio error code: ${err.code}, moreInfo: ${err.moreInfo || 'n/a'}`);
   }
 }
 
