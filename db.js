@@ -143,25 +143,29 @@ async function logAssignment({
 }
 
 async function getNextManhattanExpert() {
-  const { rows } = await pool.query('SELECT increment_manhattan_counter() AS counter');
+  const { WENDY_ID, ALLISON_ID } = require('./routing-config');
 
-  if (rows.length === 0) {
-    const { rows: fallbackRows } = await pool.query(
-      'SELECT counter FROM manhattan_rotation WHERE id = 1'
-    );
-    const currentCounter = fallbackRows[0]?.counter || 0;
-    const newCounter = currentCounter + 1;
-    await pool.query(
-      'UPDATE manhattan_rotation SET counter = $1, last_updated = NOW() WHERE id = 1',
-      [newCounter]
-    );
-    const { WENDY_ID, ALLISON_ID } = require('./routing-config');
-    return newCounter % 3 < 2 ? WENDY_ID : ALLISON_ID;
+  try {
+    const { rows } = await pool.query('SELECT increment_manhattan_counter() AS counter');
+
+    if (rows.length > 0) {
+      const counter = rows[0].counter;
+      return counter % 3 < 2 ? WENDY_ID : ALLISON_ID;
+    }
+  } catch (err) {
+    console.error('Manhattan rotation RPC error, falling back to manual increment:', err.message);
   }
 
-  const counter = rows[0].counter;
-  const { WENDY_ID, ALLISON_ID } = require('./routing-config');
-  return counter % 3 < 2 ? WENDY_ID : ALLISON_ID;
+  const { rows: fallbackRows } = await pool.query(
+    'SELECT counter FROM manhattan_rotation WHERE id = 1'
+  );
+  const currentCounter = fallbackRows[0]?.counter || 0;
+  const newCounter = currentCounter + 1;
+  await pool.query(
+    'UPDATE manhattan_rotation SET counter = $1, last_updated = NOW() WHERE id = 1',
+    [newCounter]
+  );
+  return newCounter % 3 < 2 ? WENDY_ID : ALLISON_ID;
 }
 
 async function getExpiredPendingLeads(minutesOld = 4) {

@@ -22,6 +22,11 @@ async function getTwilioCredentials() {
       },
     }
   );
+
+  if (!res.ok) {
+    throw new Error(`Twilio connector API returned ${res.status}`);
+  }
+
   const data = await res.json();
   const connection = data.items?.[0];
 

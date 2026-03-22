@@ -23,6 +23,11 @@ async function getResendCredentials() {
       },
     }
   );
+
+  if (!res.ok) {
+    throw new Error(`Resend connector API returned ${res.status}`);
+  }
+
   const data = await res.json();
   const connection = data.items?.[0];
 
