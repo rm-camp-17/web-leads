@@ -1,0 +1,303 @@
+const express = require('express');
+const { normalizeFields, isDetailedForm, extractChildren } = require('./field-normalizer');
+const hubspot = require('./hubspot');
+const sb = require('./supabase');
+const { routeLead } = require('./routing-engine');
+const { sendExpertNotification } = require('./notifications');
+const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
+
+const app = express();
+app.use(express.json());
+
+// Health check
+app.get('/', (_req, res) => {
+  res.json({ status: 'ok', service: 'Camp Experts Lead Routing Engine' });
+});
+
+// ── Main Webhook Endpoint ──
+app.post('/api/webhook/webflow-lead', async (req, res) => {
+  try {
+    const rawPayload = req.body;
+    console.log('[webhook] Received payload:', JSON.stringify(rawPayload));
+
+    const normalized = normalizeFields(rawPayload);
+    const email = (normalized.email || '').toLowerCase();
+
+    if (!email) {
+      console.warn('[webhook] No email in payload, skipping');
+      return res.status(400).json({ error: 'Missing email' });
+    }
+
+    if (isDetailedForm(normalized)) {
+      await handleDetailedForm(normalized, rawPayload);
+    } else {
+      await handleShortForm(normalized, rawPayload);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[webhook] Error:', err.message, err.stack);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── Test Routing Endpoint (no HubSpot writes) ──
+app.post('/api/test-routing', async (req, res) => {
+  try {
+    const normalized = normalizeFields(req.body);
+    const children = extractChildren(normalized);
+    const { routeLead: testRoute } = require('./routing-engine');
+    const result = await testRoute(normalized);
+    const expert = EXPERTS[result.expertId];
+
+    res.json({
+      input: {
+        email: normalized.email,
+        zip: normalized.zip,
+        country: normalized.country,
+        phone: normalized.phone,
+        source_url: normalized.source_url,
+        is_detailed: isDetailedForm(normalized),
+        children_count: children.length,
+      },
+      routing: {
+        expertId: result.expertId,
+        expertName: expert?.name || 'Unknown',
+        expertEmail: expert?.email || 'Unknown',
+        rule: result.rule,
+      },
+    });
+  } catch (err) {
+    console.error('[test-routing] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Short Form Handler ──
+async function handleShortForm(normalized, rawPayload) {
+  const email = normalized.email.toLowerCase();
+  console.log(`[short-form] Processing for ${email}`);
+
+  // Idempotency: skip if we already have a pending lead for this email within 60s
+  const isDupe = await sb.isDuplicateShortForm(email);
+  if (isDupe) {
+    console.log(`[short-form] Duplicate within 60s for ${email}, skipping`);
+    return;
+  }
+
+  // Search for existing contact in HubSpot
+  let contact = await hubspot.searchContactByEmail(email);
+  if (!contact && normalized.phone) {
+    contact = await hubspot.searchContactByPhone(normalized.phone);
+  }
+
+  // Create contact if not found
+  let contactId;
+  if (!contact) {
+    const created = await hubspot.createContact({
+      firstName: normalized.first_name,
+      lastName: normalized.last_name,
+      email,
+      phone: normalized.phone,
+    });
+    contactId = created.id;
+    console.log(`[short-form] Created HubSpot contact ${contactId}`);
+  } else {
+    contactId = contact.id;
+    console.log(`[short-form] Found existing HubSpot contact ${contactId}`);
+  }
+
+  // Insert pending lead
+  const pendingLead = await sb.insertPendingLead({
+    email,
+    phone: normalized.phone,
+    contactId,
+    rawPayload,
+  });
+  console.log(`[short-form] Inserted pending lead ${pendingLead.id}`);
+
+  // Start 10-minute timeout
+  const pendingId = pendingLead.id;
+  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 10 * 60 * 1000);
+  console.log(`[short-form] Started 10-minute timeout for ${email}`);
+}
+
+// ── Detailed Form Handler ──
+async function handleDetailedForm(normalized, rawPayload) {
+  const email = normalized.email.toLowerCase();
+  console.log(`[detailed-form] Processing for ${email}`);
+
+  // Look up pending lead
+  const pendingLead = await sb.findPendingLeadByEmail(email);
+
+  // Find or create contact in HubSpot
+  let contact = await hubspot.searchContactByEmail(email);
+  let contactId;
+
+  if (!contact) {
+    const created = await hubspot.createContact({
+      firstName: normalized.first_name,
+      lastName: normalized.last_name,
+      email,
+      phone: normalized.phone,
+    });
+    contactId = created.id;
+    console.log(`[detailed-form] Created HubSpot contact ${contactId}`);
+  } else {
+    contactId = contact.id;
+    console.log(`[detailed-form] Found existing HubSpot contact ${contactId}`);
+  }
+
+  // Update contact with location details
+  const updateProps = {};
+  if (normalized.zip) updateProps.zip = normalized.zip;
+  if (normalized.country) updateProps.country = normalized.country;
+  if (normalized.address) updateProps.address = normalized.address;
+  if (normalized.city) updateProps.city = normalized.city;
+
+  if (Object.keys(updateProps).length > 0) {
+    await hubspot.updateContact(contactId, updateProps);
+    console.log(`[detailed-form] Updated contact ${contactId} with location data`);
+  }
+
+  // Create child records
+  const children = extractChildren(normalized);
+  for (const child of children) {
+    try {
+      const created = await hubspot.createChild({
+        firstName: child.first_name,
+        lastName: child.last_name,
+        birthDate: child.birth_date,
+        gender: child.gender,
+        interestedYear: child.interested_year,
+        budget: child.budget_per_week,
+        sessionLength: child.session_length,
+      });
+      await hubspot.associateChildWithContact(created.id, contactId);
+      console.log(`[detailed-form] Created and associated child ${created.id}`);
+    } catch (err) {
+      console.error(`[detailed-form] Error creating child record:`, err.message);
+    }
+  }
+
+  // Run routing engine
+  const routingResult = await routeLead(normalized);
+  console.log(`[detailed-form] Routing result:`, routingResult);
+
+  // Set contact owner
+  await hubspot.setContactOwner(contactId, routingResult.expertId);
+
+  // Create deal
+  const familyName = `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email;
+  await hubspot.createDeal({
+    contactId,
+    ownerId: routingResult.expertId,
+    familyName,
+  });
+  console.log(`[detailed-form] Created deal for ${familyName}`);
+
+  // Send notification email
+  await sendExpertNotification({
+    expertOwnerId: routingResult.expertId,
+    lead: normalized,
+    children,
+  });
+
+  // Log assignment
+  const expert = EXPERTS[routingResult.expertId];
+  await sb.logAssignment({
+    contactId,
+    contactEmail: email,
+    contactName: familyName,
+    expertOwnerId: routingResult.expertId,
+    expertName: expert?.name || 'Unknown',
+    routingRule: routingResult.rule,
+    zip: normalized.zip,
+    country: normalized.country,
+    phone: normalized.phone,
+    rawPayload,
+  });
+
+  // Clean up pending lead if it exists
+  if (pendingLead) {
+    await sb.deletePendingLead(pendingLead.id);
+    console.log(`[detailed-form] Deleted pending lead ${pendingLead.id}`);
+  }
+
+  console.log(`[detailed-form] Complete: ${familyName} → ${expert?.name || routingResult.expertId}`);
+}
+
+// ── 10-Minute Timeout Handler ──
+async function handleTimeout(pendingLeadId, contactId, email, normalized) {
+  try {
+    // Check if the pending lead still exists (not yet processed by detailed form)
+    const pending = await sb.findPendingLeadByEmail(email);
+    if (!pending || pending.id !== pendingLeadId) {
+      console.log(`[timeout] Pending lead ${pendingLeadId} already processed, skipping`);
+      return;
+    }
+
+    console.log(`[timeout] No detailed form for ${email}, assigning to office`);
+
+    // Assign to Camp Experts Office
+    await hubspot.setContactOwner(contactId, CAMP_EXPERTS_OFFICE_ID);
+
+    // Log assignment
+    const expert = EXPERTS[CAMP_EXPERTS_OFFICE_ID];
+    await sb.logAssignment({
+      contactId,
+      contactEmail: email,
+      contactName: `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim(),
+      expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
+      expertName: expert?.name || 'Camp Experts Office',
+      routingRule: 'timeout_fallback',
+      phone: normalized.phone,
+      rawPayload: normalized,
+    });
+
+    // Delete pending lead
+    await sb.deletePendingLead(pendingLeadId);
+    console.log(`[timeout] Assigned ${email} to Camp Experts Office (timeout)`);
+  } catch (err) {
+    console.error(`[timeout] Error handling timeout for ${email}:`, err.message);
+  }
+}
+
+// ── Periodic cleanup: check for expired pending leads ──
+// Runs every 5 minutes as a safety net in case a setTimeout was lost (e.g., server restart)
+setInterval(async () => {
+  try {
+    const expired = await sb.getExpiredPendingLeads(10);
+    for (const lead of expired) {
+      console.log(`[cleanup] Found expired pending lead: ${lead.email}`);
+      try {
+        if (lead.contact_id) {
+          await hubspot.setContactOwner(lead.contact_id, CAMP_EXPERTS_OFFICE_ID);
+        }
+        const expert = EXPERTS[CAMP_EXPERTS_OFFICE_ID];
+        await sb.logAssignment({
+          contactId: lead.contact_id || 'unknown',
+          contactEmail: lead.email,
+          contactName: null,
+          expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
+          expertName: expert?.name || 'Camp Experts Office',
+          routingRule: 'timeout_fallback_cleanup',
+          phone: lead.phone,
+          rawPayload: lead.raw_payload,
+        });
+        await sb.deletePendingLead(lead.id);
+        console.log(`[cleanup] Processed expired lead ${lead.email}`);
+      } catch (err) {
+        console.error(`[cleanup] Error processing expired lead ${lead.email}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[cleanup] Error checking expired leads:', err.message);
+  }
+}, 5 * 60 * 1000);
+
+// ── Start Server ──
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Camp Experts Lead Routing Engine running on port ${PORT}`);
+});
