@@ -41,11 +41,6 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_assignment_log_expert ON assignment_log(expert_owner_id);
       CREATE INDEX IF NOT EXISTS idx_assignment_log_created ON assignment_log(created_at);
       CREATE INDEX IF NOT EXISTS idx_assignment_log_rule ON assignment_log(routing_rule);
-      CREATE INDEX IF NOT EXISTS idx_assignment_log_source ON assignment_log(lead_source);
-
-      -- Migration: add lead_source columns to existing tables
-      ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS lead_source TEXT;
-      ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS lead_source_detail JSONB;
 
       CREATE TABLE IF NOT EXISTS manhattan_rotation (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -70,9 +65,26 @@ async function initDatabase() {
       END;
       $$ LANGUAGE plpgsql;
     `);
+
+    await addColumnIfNotExists(client, 'assignment_log', 'lead_source', 'TEXT');
+    await addColumnIfNotExists(client, 'assignment_log', 'lead_source_detail', 'JSONB');
+
+    await client.query('CREATE INDEX IF NOT EXISTS idx_assignment_log_lead_source ON assignment_log(lead_source)');
+
     console.log('[db] Database tables initialized');
   } finally {
     client.release();
+  }
+}
+
+async function addColumnIfNotExists(client, table, column, type) {
+  const { rows } = await client.query(`
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = $1 AND column_name = $2
+  `, [table, column]);
+  if (rows.length === 0) {
+    await client.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    console.log(`[db] Added column ${column} to ${table}`);
   }
 }
 

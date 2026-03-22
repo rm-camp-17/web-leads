@@ -3,26 +3,6 @@ const { HUBSPOT_CHILD_OBJECT_ID, HUBSPOT_HOUSEHOLD_OBJECT_ID } = require('./rout
 
 const connectors = new ReplitConnectors();
 
-// Object type IDs (numeric, unambiguous)
-const OBJ = {
-  CONTACT: '0-1',
-  DEAL: '0-3',
-  HOUSEHOLD: HUBSPOT_HOUSEHOLD_OBJECT_ID,   // 2-53610744
-  CHILD: HUBSPOT_CHILD_OBJECT_ID,           // 2-50911061
-};
-
-// Association type IDs (from migration config)
-const ASSOC = {
-  CONTACT_HOUSEHOLD: { id: 112, category: 'USER_DEFINED' },
-  CHILD_HOUSEHOLD:   { id: 110, category: 'USER_DEFINED' },
-  CONTACT_CHILD:     { id: 78,  category: 'USER_DEFINED' },
-  DEAL_HOUSEHOLD:    { id: 170, category: 'USER_DEFINED' },
-  DEAL_CHILD:        { id: 153, category: 'USER_DEFINED' },
-  DEAL_CONTACT:      { id: 3,   category: 'HUBSPOT_DEFINED' },
-};
-
-// ── Low-level API helper ──
-
 async function hubspotFetch(path, options = {}) {
   const method = options.method || 'GET';
   const fetchOptions = { method };
@@ -34,90 +14,14 @@ async function hubspotFetch(path, options = {}) {
 
   const res = await connectors.proxy("hubspot", path, fetchOptions);
 
-  // Return raw response when caller needs to inspect status (e.g. 409 conflict)
-  if (options.rawResponse) return res;
-
   if (!res.ok) {
     const body = await res.text();
-    const err = new Error(`HubSpot API ${method} ${path} → ${res.status}: ${body}`);
-    err.status = res.status;
-    err.body = body;
-    throw err;
+    throw new Error(`HubSpot API ${method} ${path} → ${res.status}: ${body}`);
   }
 
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
-
-// ── Association helper ──
-
-async function associate(fromType, fromId, toType, toId, assocSpec) {
-  await hubspotFetch(
-    `/crm/v4/objects/${fromType}/${fromId}/associations/${toType}/${toId}`,
-    {
-      method: 'PUT',
-      body: JSON.stringify([{
-        associationCategory: assocSpec.category,
-        associationTypeId: assocSpec.id,
-      }]),
-    }
-  );
-}
-
-// ── Household (p_household) — 2-53610744 ──
-
-async function searchHouseholdByEmailOrPhone(email, phone) {
-  const filterGroups = [];
-  if (email) {
-    filterGroups.push({
-      filters: [{ propertyName: 'emailaddress', operator: 'EQ', value: email }],
-    });
-  }
-  if (phone) {
-    filterGroups.push({
-      filters: [{ propertyName: 'cellnumber', operator: 'EQ', value: phone }],
-    });
-  }
-  if (filterGroups.length === 0) return null;
-
-  const data = await hubspotFetch(`/crm/v3/objects/${OBJ.HOUSEHOLD}/search`, {
-    method: 'POST',
-    body: JSON.stringify({
-      filterGroups,
-      properties: ['householdid', 'household_name', 'emailaddress', 'cellnumber', 'hubspot_owner_id'],
-    }),
-  });
-  return data.results?.[0] || null;
-}
-
-async function createHousehold({ householdId, lastName, email, phone, numChildren, country, zip, ownerId }) {
-  const properties = {
-    household_name: `${lastName} Family`,
-    familyname: lastName,
-    householdid: householdId,
-    hubspot_owner_id: ownerId,
-  };
-  if (email) properties.emailaddress = email;
-  if (phone) properties.cellnumber = phone;
-  if (numChildren != null) properties.num_children = String(numChildren);
-  if (country) properties['state___country__if_int_l_'] = country;
-  if (zip) properties.zip = zip;
-
-  const data = await hubspotFetch(`/crm/v3/objects/${OBJ.HOUSEHOLD}`, {
-    method: 'POST',
-    body: JSON.stringify({ properties }),
-  });
-  return data;
-}
-
-async function updateHousehold(recordId, properties) {
-  return hubspotFetch(`/crm/v3/objects/${OBJ.HOUSEHOLD}/${recordId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ properties }),
-  });
-}
-
-// ── Contact (standard) — 0-1 ──
 
 async function searchContactByEmail(email) {
   const data = await hubspotFetch('/crm/v3/objects/contacts/search', {
@@ -126,7 +30,7 @@ async function searchContactByEmail(email) {
       filterGroups: [{
         filters: [{ propertyName: 'email', operator: 'EQ', value: email }],
       }],
-      properties: ['email', 'firstname', 'lastname', 'phone', 'hubspot_owner_id', 'family_id'],
+      properties: ['email', 'firstname', 'lastname', 'phone', 'hubspot_owner_id'],
     }),
   });
   return data.results?.[0] || null;
@@ -139,172 +43,189 @@ async function searchContactByPhone(phone) {
       filterGroups: [{
         filters: [{ propertyName: 'phone', operator: 'EQ', value: phone }],
       }],
-      properties: ['email', 'firstname', 'lastname', 'phone', 'hubspot_owner_id', 'family_id'],
+      properties: ['email', 'firstname', 'lastname', 'phone', 'hubspot_owner_id'],
     }),
   });
   return data.results?.[0] || null;
 }
 
-async function createContact({ firstName, lastName, email, phone, contactId, familyId, ownerId }) {
+async function createContact({ firstName, lastName, email, phone, ownerId }) {
   const properties = {
+    email,
     firstname: firstName || '',
     lastname: lastName || '',
-    contact_id: contactId,
-    family_id: familyId,
-    is_primary_contact: 'true',
-    role: 'Parent',
   };
-  if (email) properties.email = email;
-  if (phone) {
-    properties.phone = phone;
-    properties.mobilephone = phone;
-  }
+  if (phone) properties.phone = phone;
   if (ownerId) properties.hubspot_owner_id = ownerId;
 
-  // HubSpot returns 409 if a contact with this email already exists
-  const res = await hubspotFetch('/crm/v3/objects/contacts', {
+  const data = await hubspotFetch('/crm/v3/objects/contacts', {
     method: 'POST',
     body: JSON.stringify({ properties }),
-    rawResponse: true,
   });
-
-  if (res.ok) {
-    const text = await res.text();
-    return { data: JSON.parse(text), isNew: true };
-  }
-
-  if (res.status === 409) {
-    // Extract existing contact ID from conflict response
-    const body = await res.text();
-    const parsed = JSON.parse(body);
-    const existingId = parsed.message?.match(/Existing ID:\s*(\d+)/)?.[1];
-    if (existingId) {
-      return { data: { id: existingId }, isNew: false };
-    }
-    throw new Error(`Contact 409 conflict but could not extract existing ID: ${body}`);
-  }
-
-  const body = await res.text();
-  throw new Error(`HubSpot API POST /crm/v3/objects/contacts → ${res.status}: ${body}`);
+  return data;
 }
 
 async function updateContact(contactId, properties) {
-  return hubspotFetch(`/crm/v3/objects/contacts/${contactId}`, {
+  const data = await hubspotFetch(`/crm/v3/objects/contacts/${contactId}`, {
     method: 'PATCH',
     body: JSON.stringify({ properties }),
   });
+  return data;
 }
 
 async function setContactOwner(contactId, ownerId) {
   return updateContact(contactId, { hubspot_owner_id: ownerId });
 }
 
-// ── Child (p_children) — 2-50911061 ──
-
-function calculateAge(dobString) {
-  const dob = new Date(dobString);
-  if (isNaN(dob.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const monthDiff = today.getMonth() - dob.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-    age--;
+async function searchHouseholdByEmail(email) {
+  if (!email) return null;
+  try {
+    const data = await hubspotFetch(`/crm/v3/objects/${HUBSPOT_HOUSEHOLD_OBJECT_ID}/search`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filterGroups: [{
+          filters: [{ propertyName: 'emailaddress', operator: 'EQ', value: email }]
+        }],
+        properties: ['householdid', 'household_name', 'emailaddress', 'cellnumber', 'zip'],
+        limit: 1,
+      }),
+    });
+    return data.results && data.results.length > 0 ? data.results[0] : null;
+  } catch (err) {
+    console.error('[hubspot] Household search by email failed:', err.message);
+    return null;
   }
-  return age;
 }
 
-async function createChild({ firstName, lastName, dob, gender, householdId, budget, interests, childId, ownerId }) {
+async function createHousehold({ householdId, familyName, email, phone, zip, country, numChildren, ownerId }) {
+  const properties = {
+    householdid: householdId,
+  };
+  if (familyName) properties.household_name = familyName;
+  if (familyName) properties.familyname = familyName;
+  if (email) properties.emailaddress = email;
+  if (phone) properties.cellnumber = phone;
+  if (zip) properties.zip = zip;
+  if (country) properties.state___country__if_int_l_ = country;
+  if (numChildren) properties.num_children = String(numChildren);
+  if (ownerId) properties.hubspot_owner_id = ownerId;
+
+  const data = await hubspotFetch(`/crm/v3/objects/${HUBSPOT_HOUSEHOLD_OBJECT_ID}`, {
+    method: 'POST',
+    body: JSON.stringify({ properties }),
+  });
+  return data;
+}
+
+async function updateHousehold(householdRecordId, properties) {
+  const data = await hubspotFetch(`/crm/v3/objects/${HUBSPOT_HOUSEHOLD_OBJECT_ID}/${householdRecordId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ properties }),
+  });
+  return data;
+}
+
+async function createChild({ firstName, lastName, birthDate, gender, interestedYear, budget, sessionLength, age, ownerId }) {
   const properties = {
     first_name: firstName || '',
     last_name: lastName || '',
-    associated_household_id: householdId,
-    child_id: childId,
-    clientid_access: childId,
-    hubspot_owner_id: ownerId,
   };
-  if (dob) {
-    properties.dob = dob;
-    const age = calculateAge(dob);
-    if (age != null) properties.age = String(age);
-  }
+  if (birthDate) properties.dob = birthDate;
+  if (age !== undefined && age !== null) properties.age = String(age);
   if (gender) properties.gender = gender;
+  if (interestedYear) properties.interested_year = interestedYear;
   if (budget) properties.budget_per_week = budget;
-  if (interests) properties.interests = interests;
+  if (sessionLength) properties.session_length = sessionLength;
+  if (ownerId) properties.hubspot_owner_id = ownerId;
 
-  const data = await hubspotFetch(`/crm/v3/objects/${OBJ.CHILD}`, {
+  const data = await hubspotFetch(`/crm/v3/objects/${HUBSPOT_CHILD_OBJECT_ID}`, {
     method: 'POST',
     body: JSON.stringify({ properties }),
   });
   return data;
 }
 
-// ── Deal (standard) — 0-3 ──
+async function associateObjects(fromObjectType, fromId, toObjectType, toId, associationTypeId, category = 'USER_DEFINED') {
+  await hubspotFetch(
+    `/crm/v4/objects/${fromObjectType}/${fromId}/associations/${toObjectType}/${toId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify([{
+        associationCategory: category,
+        associationTypeId: associationTypeId,
+      }]),
+    }
+  );
+}
 
-async function createDeal({ childFirstName, childLastName, year, householdId, childId, ownerId }) {
-  const dealName = `${childFirstName} ${childLastName} | ${year || new Date().getFullYear()}`;
+async function associateChildWithContact(childId, contactId) {
+  await associateObjects(HUBSPOT_CHILD_OBJECT_ID, childId, 'contacts', contactId, 78);
+}
+
+async function associateContactWithHousehold(contactId, householdId) {
+  await associateObjects('contacts', contactId, HUBSPOT_HOUSEHOLD_OBJECT_ID, householdId, 112);
+}
+
+async function associateChildWithHousehold(childId, householdId) {
+  await associateObjects(HUBSPOT_CHILD_OBJECT_ID, childId, HUBSPOT_HOUSEHOLD_OBJECT_ID, householdId, 110);
+}
+
+async function associateDealWithHousehold(dealId, householdId) {
+  await associateObjects('deals', dealId, HUBSPOT_HOUSEHOLD_OBJECT_ID, householdId, 170);
+}
+
+async function associateDealWithChild(dealId, childId) {
+  await associateObjects('deals', dealId, HUBSPOT_CHILD_OBJECT_ID, childId, 153);
+}
+
+async function associateDealWithContact(dealId, contactId) {
+  await associateObjects('deals', dealId, 'contacts', contactId, 3, 'HUBSPOT_DEFINED');
+}
+
+async function createDeal({ contactId, ownerId, dealName, householdId, childId }) {
   const properties = {
     dealname: dealName,
-    pipeline: 'default',
     dealstage: 'appointmentscheduled',
-    associated_household_id: householdId,
-    associated_child_id: childId,
     hubspot_owner_id: ownerId,
+    pipeline: 'default',
   };
-  if (year) properties.year1 = year;
+  if (householdId) properties.associated_household_id = householdId;
+  if (childId) properties.associated_child_id = childId;
 
-  const data = await hubspotFetch('/crm/v3/objects/deals', {
+  const deal = await hubspotFetch('/crm/v3/objects/deals', {
     method: 'POST',
     body: JSON.stringify({ properties }),
   });
-  return data;
+
+  const associationPromises = [];
+  if (contactId) associationPromises.push(associateDealWithContact(deal.id, contactId));
+  if (householdId) associationPromises.push(associateDealWithHousehold(deal.id, householdId));
+  if (childId) associationPromises.push(associateDealWithChild(deal.id, childId));
+
+  await Promise.all(associationPromises);
+
+  return deal;
 }
-
-// ── Association convenience functions ──
-
-async function createAllAssociations({ contactId, householdRecordId, childRecordId, dealRecordId }) {
-  // Contact ↔ Household (type 112)
-  await associate(OBJ.CONTACT, contactId, OBJ.HOUSEHOLD, householdRecordId, ASSOC.CONTACT_HOUSEHOLD);
-
-  if (childRecordId) {
-    // Child ↔ Household (type 110)
-    await associate(OBJ.CHILD, childRecordId, OBJ.HOUSEHOLD, householdRecordId, ASSOC.CHILD_HOUSEHOLD);
-    // Contact ↔ Child (type 78)
-    await associate(OBJ.CONTACT, contactId, OBJ.CHILD, childRecordId, ASSOC.CONTACT_CHILD);
-  }
-
-  if (dealRecordId) {
-    // Deal ↔ Household (type 170)
-    await associate(OBJ.DEAL, dealRecordId, OBJ.HOUSEHOLD, householdRecordId, ASSOC.DEAL_HOUSEHOLD);
-    // Deal → Contact (type 3, HUBSPOT_DEFINED — direction matters)
-    await associate(OBJ.DEAL, dealRecordId, OBJ.CONTACT, contactId, ASSOC.DEAL_CONTACT);
-
-    if (childRecordId) {
-      // Deal ↔ Child (type 153)
-      await associate(OBJ.DEAL, dealRecordId, OBJ.CHILD, childRecordId, ASSOC.DEAL_CHILD);
-    }
-  }
-}
-
-// ── Routing engine helpers (existing family lookups) ──
 
 async function getContactDeals(contactId) {
   const data = await hubspotFetch(
-    `/crm/v4/objects/${OBJ.CONTACT}/${contactId}/associations/${OBJ.DEAL}`,
+    `/crm/v4/objects/contacts/${contactId}/associations/deals`,
     { method: 'GET' }
   );
   return data.results || [];
 }
 
 async function getDeal(dealId) {
-  return hubspotFetch(`/crm/v3/objects/deals/${dealId}?properties=hubspot_owner_id`, {
+  const data = await hubspotFetch(`/crm/v3/objects/deals/${dealId}?properties=hubspot_owner_id`, {
     method: 'GET',
   });
+  return data;
 }
 
 async function getContactHouseholds(contactId) {
   try {
     const data = await hubspotFetch(
-      `/crm/v4/objects/${OBJ.CONTACT}/${contactId}/associations/${OBJ.HOUSEHOLD}`,
+      `/crm/v4/objects/contacts/${contactId}/associations/${HUBSPOT_HOUSEHOLD_OBJECT_ID}`,
       { method: 'GET' }
     );
     return data.results || [];
@@ -316,7 +237,7 @@ async function getContactHouseholds(contactId) {
 async function getHouseholdContacts(householdId) {
   try {
     const data = await hubspotFetch(
-      `/crm/v4/objects/${OBJ.HOUSEHOLD}/${householdId}/associations/${OBJ.CONTACT}`,
+      `/crm/v4/objects/${HUBSPOT_HOUSEHOLD_OBJECT_ID}/${householdId}/associations/contacts`,
       { method: 'GET' }
     );
     return data.results || [];
@@ -326,23 +247,22 @@ async function getHouseholdContacts(householdId) {
 }
 
 module.exports = {
-  // Household
-  searchHouseholdByEmailOrPhone,
-  createHousehold,
-  updateHousehold,
-  // Contact
   searchContactByEmail,
   searchContactByPhone,
+  searchHouseholdByEmail,
   createContact,
   updateContact,
   setContactOwner,
-  // Child
+  createHousehold,
+  updateHousehold,
   createChild,
-  // Deal
+  associateChildWithContact,
+  associateContactWithHousehold,
+  associateChildWithHousehold,
+  associateDealWithContact,
+  associateDealWithHousehold,
+  associateDealWithChild,
   createDeal,
-  // Associations
-  createAllAssociations,
-  // Routing engine helpers
   getContactDeals,
   getDeal,
   getContactHouseholds,

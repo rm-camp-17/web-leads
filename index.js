@@ -1,21 +1,19 @@
 const express = require('express');
 const { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource } = require('./field-normalizer');
 const hubspot = require('./hubspot');
-const db = require('./db');
+const sb = require('./db');
 const { routeLead } = require('./routing-engine');
-const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp } = require('./notifications');
+const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp, sendInternalFormNotification } = require('./notifications');
 const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
 
 const app = express();
 app.use(express.json());
 
-// Health check
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'Camp Experts Lead Routing Engine' });
 });
 
-// ── Main Webhook Endpoint (lead forms) ──
 app.post('/api/webhook/webflow-lead', async (req, res) => {
   try {
     const rawPayload = req.body;
@@ -42,30 +40,34 @@ app.post('/api/webhook/webflow-lead', async (req, res) => {
   }
 });
 
-// ── Internal Form Webhook (team applications, contact forms, email signups) ──
-// Forwards submission directly to Riley via email
+const INTERNAL_FORM_NAMES = [
+  'Camp Experts Team Application',
+  'Contact 6 Form',
+  'Email Form',
+  'Email Form 2',
+];
+
 app.post('/api/webhook/webflow-internal', async (req, res) => {
   try {
-    const rawPayload = req.body;
-    const formName = rawPayload._formName || 'Unknown Form';
-    console.log(`[internal-form] Received "${formName}" submission:`, JSON.stringify(rawPayload));
+    const payload = req.body;
+    const formName = payload._formName || payload.formName || payload['Form Name'] || 'Unknown Form';
+    console.log(`[internal] Received "${formName}" submission`);
 
-    const { sendInternalFormNotification } = require('./notifications');
-    await sendInternalFormNotification({ formName, payload: rawPayload });
+    await sendInternalFormNotification({ formName, payload });
 
     res.json({ success: true });
   } catch (err) {
-    console.error('[internal-form] Error:', err.message, err.stack);
+    console.error('[internal] Error:', err.message, err.stack);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ── Test Routing Endpoint (no HubSpot writes) ──
 app.post('/api/test-routing', async (req, res) => {
   try {
     const normalized = normalizeFields(req.body);
     const children = extractChildren(normalized);
-    const result = await routeLead(normalized);
+    const { routeLead: testRoute } = require('./routing-engine');
+    const result = await testRoute(normalized);
     const expert = EXPERTS[result.expertId];
 
     res.json({
@@ -91,237 +93,231 @@ app.post('/api/test-routing', async (req, res) => {
   }
 });
 
-// ── Short Form Handler ──
-// Short form has only: first_name, last_name, email, phone
-// Creates: Household + Contact + Contact↔Household association
-// Does NOT create children or deals (no child data available)
+function calculateAge(birthDateStr) {
+  const birth = new Date(birthDateStr);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age;
+}
+
 async function handleShortForm(normalized, rawPayload) {
   const email = normalized.email.toLowerCase();
   console.log(`[short-form] Processing for ${email}`);
 
-  // Idempotency: skip if we already have a pending lead for this email within 6 hours
-  const isDupe = await db.isDuplicateShortForm(email);
+  const isDupe = await sb.isDuplicateShortForm(email);
   if (isDupe) {
     console.log(`[short-form] Duplicate within 6h for ${email}, skipping`);
     return;
   }
 
-  const lastName = normalized.last_name || '';
-  const ownerId = CAMP_EXPERTS_OFFICE_ID; // Short form → office until detailed form arrives
+  let contact = await hubspot.searchContactByEmail(email);
+  if (!contact && normalized.phone) {
+    contact = await hubspot.searchContactByPhone(normalized.phone);
+  }
 
-  // Step 1: Search for existing household by email/phone
-  let household = await hubspot.searchHouseholdByEmailOrPhone(email, normalized.phone);
-  let householdId;       // Our internal WF_ ID
-  let householdRecordId; // HubSpot record ID
-
-  if (household) {
-    householdId = household.properties?.householdid;
-    householdRecordId = household.id;
-    console.log(`[short-form] Found existing household ${householdRecordId} (${householdId})`);
-  } else {
-    householdId = `WF_${Date.now()}`;
-    const created = await hubspot.createHousehold({
-      householdId,
-      lastName,
+  let contactId;
+  if (!contact) {
+    const created = await hubspot.createContact({
+      firstName: normalized.first_name,
+      lastName: normalized.last_name,
       email,
       phone: normalized.phone,
-      numChildren: null,
-      country: null,
-      zip: null,
-      ownerId,
+      ownerId: CAMP_EXPERTS_OFFICE_ID,
     });
-    householdRecordId = created.id;
-    console.log(`[short-form] Created household ${householdRecordId} (${householdId})`);
-  }
-
-  // Step 2: Create or find contact
-  const contactId_gen = `WF_${householdId}_P1`;
-  const { data: contactData, isNew: contactIsNew } = await hubspot.createContact({
-    firstName: normalized.first_name,
-    lastName,
-    email,
-    phone: normalized.phone,
-    contactId: contactId_gen,
-    familyId: householdId,
-    ownerId,
-  });
-  const contactId = contactData.id;
-
-  if (contactIsNew) {
-    console.log(`[short-form] Created contact ${contactId}`);
+    contactId = created.id;
+    console.log(`[short-form] Created HubSpot contact ${contactId}`);
   } else {
-    console.log(`[short-form] Found existing contact ${contactId} (409 conflict)`);
-    // Update with latest info
-    await hubspot.updateContact(contactId, {
-      firstname: normalized.first_name || undefined,
-      lastname: lastName || undefined,
-      phone: normalized.phone || undefined,
-      family_id: householdId,
-      hubspot_owner_id: ownerId,
-    });
+    contactId = contact.id;
+    console.log(`[short-form] Found existing HubSpot contact ${contactId}`);
   }
 
-  // Step 3: Associate Contact ↔ Household
-  await hubspot.createAllAssociations({ contactId, householdRecordId });
-  console.log(`[short-form] Created Contact↔Household association`);
+  const familyName = `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email;
+  let householdRecordId;
+  try {
+    const existingHousehold = await hubspot.searchHouseholdByEmail(email);
+    if (existingHousehold) {
+      householdRecordId = existingHousehold.id;
+      console.log(`[short-form] Found existing Household ${householdRecordId}`);
+    } else {
+      const householdId = `WF_${Date.now()}`;
+      const household = await hubspot.createHousehold({
+        householdId,
+        familyName,
+        email,
+        phone: normalized.phone,
+        ownerId: CAMP_EXPERTS_OFFICE_ID,
+      });
+      householdRecordId = household.id;
+      console.log(`[short-form] Created Household ${householdRecordId}`);
+    }
 
-  // Insert pending lead for timeout handling
-  const pendingLead = await db.insertPendingLead({
+    await hubspot.associateContactWithHousehold(contactId, householdRecordId);
+    console.log(`[short-form] Associated Contact ${contactId} ↔ Household ${householdRecordId}`);
+  } catch (err) {
+    console.error(`[short-form] Error creating household:`, err.message);
+  }
+
+  const pendingPayload = {
+    ...rawPayload,
+    _contactId: contactId,
+    _householdRecordId: householdRecordId || null,
+  };
+
+  const pendingLead = await sb.insertPendingLead({
     email,
     phone: normalized.phone,
     contactId,
-    rawPayload: { ...rawPayload, _householdId: householdId, _householdRecordId: householdRecordId },
+    rawPayload: pendingPayload,
   });
   console.log(`[short-form] Inserted pending lead ${pendingLead.id}`);
 
-  // Start 4-minute timeout
-  setTimeout(() => handleTimeout(pendingLead.id, contactId, householdRecordId, email, normalized), 4 * 60 * 1000);
+  const pendingId = pendingLead.id;
+  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 4 * 60 * 1000);
   console.log(`[short-form] Started 4-minute timeout for ${email}`);
 }
 
-// ── Detailed Form Handler ──
-// Full flow: Household → Contact → Children → Deals → All 6 associations
 async function handleDetailedForm(normalized, rawPayload) {
   const email = normalized.email.toLowerCase();
   console.log(`[detailed-form] Processing for ${email}`);
 
-  // Look up pending lead (may have short form data including household IDs)
-  const pendingLead = await db.findPendingLeadByEmail(email);
+  const pendingLead = await sb.findPendingLeadByEmail(email);
 
-  const lastName = normalized.last_name || '';
-  const children = extractChildren(normalized);
-  const leadSource = extractLeadSource(rawPayload);
-  console.log(`[detailed-form] Lead source:`, leadSource);
+  let contact = await hubspot.searchContactByEmail(email);
+  let contactId;
 
-  // Run routing engine first so we have the expert ID for all records
-  const routingResult = await routeLead(normalized);
-  console.log(`[detailed-form] Routing result:`, routingResult);
-  const ownerId = routingResult.expertId;
-  const isReturningFamily = routingResult.rule.startsWith('existing_family');
-  const familyName = `${normalized.first_name || ''} ${lastName}`.trim() || email;
-  const expert = EXPERTS[ownerId];
-
-  // ── STEP 2: Create/find Household ──
-  let household = await hubspot.searchHouseholdByEmailOrPhone(email, normalized.phone);
-  let householdId;
-  let householdRecordId;
-
-  if (household) {
-    householdId = household.properties?.householdid;
-    householdRecordId = household.id;
-    console.log(`[detailed-form] Found existing household ${householdRecordId} (${householdId})`);
-    // Update with full data from detailed form
-    await hubspot.updateHousehold(householdRecordId, {
-      num_children: String(children.length),
-      'state___country__if_int_l_': normalized.country || undefined,
-      zip: normalized.zip || undefined,
-      hubspot_owner_id: ownerId,
-    });
-  } else {
-    householdId = `WF_${Date.now()}`;
-    const created = await hubspot.createHousehold({
-      householdId,
-      lastName,
+  if (!contact) {
+    const created = await hubspot.createContact({
+      firstName: normalized.first_name,
+      lastName: normalized.last_name,
       email,
       phone: normalized.phone,
-      numChildren: children.length,
-      country: normalized.country,
-      zip: normalized.zip,
-      ownerId,
     });
-    householdRecordId = created.id;
-    console.log(`[detailed-form] Created household ${householdRecordId} (${householdId})`);
-  }
-
-  // ── STEP 3: Create/find Contact ──
-  const contactId_gen = `WF_${householdId}_P1`;
-  const { data: contactData, isNew: contactIsNew } = await hubspot.createContact({
-    firstName: normalized.first_name,
-    lastName,
-    email,
-    phone: normalized.phone,
-    contactId: contactId_gen,
-    familyId: householdId,
-    ownerId,
-  });
-  const contactId = contactData.id;
-
-  if (contactIsNew) {
-    console.log(`[detailed-form] Created contact ${contactId}`);
+    contactId = created.id;
+    console.log(`[detailed-form] Created HubSpot contact ${contactId}`);
   } else {
-    console.log(`[detailed-form] Found existing contact ${contactId} (409 conflict)`);
-    await hubspot.updateContact(contactId, {
-      firstname: normalized.first_name || undefined,
-      lastname: lastName || undefined,
-      phone: normalized.phone || undefined,
-      mobilephone: normalized.phone || undefined,
-      family_id: householdId,
-      hubspot_owner_id: ownerId,
-    });
+    contactId = contact.id;
+    console.log(`[detailed-form] Found existing HubSpot contact ${contactId}`);
   }
 
-  // ── STEP 4 & 5: Create Children + Deals (one deal per child) ──
-  const childRecords = [];
-  const dealRecords = [];
+  const children = extractChildren(normalized);
+  const leadSource = extractLeadSource(normalized);
 
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i];
-    const childIdStr = `WF_${householdId}_C${i + 1}`;
+  const routingResult = await routeLead(normalized);
+  console.log(`[detailed-form] Routing result:`, routingResult);
 
+  const isReturningFamily = routingResult.rule.startsWith('existing_family');
+  const familyName = `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email;
+  const expert = EXPERTS[routingResult.expertId];
+
+  let householdRecordId = pendingLead?.raw_payload?._householdRecordId || null;
+
+  if (householdRecordId) {
     try {
-      const childRecord = await hubspot.createChild({
+      await hubspot.updateHousehold(householdRecordId, {
+        zip: normalized.zip || undefined,
+        state___country__if_int_l_: normalized.country || undefined,
+        num_children: children.length ? String(children.length) : undefined,
+        hubspot_owner_id: routingResult.expertId,
+      });
+      console.log(`[detailed-form] Updated Household ${householdRecordId}`);
+    } catch (err) {
+      console.error(`[detailed-form] Error updating household:`, err.message);
+    }
+  } else {
+    try {
+      const existingHousehold = await hubspot.searchHouseholdByEmail(email);
+      if (existingHousehold) {
+        householdRecordId = existingHousehold.id;
+        console.log(`[detailed-form] Found existing Household ${householdRecordId}`);
+        await hubspot.updateHousehold(householdRecordId, {
+          zip: normalized.zip || undefined,
+          state___country__if_int_l_: normalized.country || undefined,
+          num_children: children.length ? String(children.length) : undefined,
+          hubspot_owner_id: routingResult.expertId,
+        });
+      } else {
+        const householdId = `WF_${Date.now()}`;
+        const household = await hubspot.createHousehold({
+          householdId,
+          familyName,
+          email,
+          phone: normalized.phone,
+          zip: normalized.zip,
+          country: normalized.country,
+          numChildren: children.length,
+          ownerId: routingResult.expertId,
+        });
+        householdRecordId = household.id;
+        console.log(`[detailed-form] Created Household ${householdRecordId}`);
+      }
+      await hubspot.associateContactWithHousehold(contactId, householdRecordId);
+    } catch (err) {
+      console.error(`[detailed-form] Error creating household:`, err.message);
+    }
+  }
+
+  const updateProps = { hubspot_owner_id: routingResult.expertId };
+  if (normalized.zip) updateProps.zip = normalized.zip;
+  if (normalized.country) updateProps.country = normalized.country;
+  if (normalized.address) updateProps.address = normalized.address;
+  if (normalized.city) updateProps.city = normalized.city;
+
+  await hubspot.updateContact(contactId, updateProps);
+  console.log(`[detailed-form] Updated contact ${contactId} with owner and location`);
+
+  const childDealPromises = children.map(async (child) => {
+    try {
+      const budget = mapBudget(child.budget_per_week);
+      const age = child.birth_date ? calculateAge(child.birth_date) : null;
+      const year = child.interested_year || new Date().getFullYear().toString();
+
+      const created = await hubspot.createChild({
         firstName: child.first_name,
         lastName: child.last_name,
-        dob: child.birth_date,
+        birthDate: child.birth_date,
         gender: child.gender,
-        householdId,
-        budget: mapBudget(child.budget_per_week),
-        interests: normalized.description || '',
-        childId: childIdStr,
-        ownerId,
+        interestedYear: child.interested_year,
+        budget: budget,
+        sessionLength: child.session_length,
+        age: age,
+        ownerId: routingResult.expertId,
       });
-      childRecords.push(childRecord);
-      console.log(`[detailed-form] Created child ${childRecord.id} (${childIdStr})`);
+      console.log(`[detailed-form] Created child ${created.id}`);
 
-      // Create one deal per child
-      const dealRecord = await hubspot.createDeal({
-        childFirstName: child.first_name,
-        childLastName: child.last_name,
-        year: child.interested_year,
-        householdId,
-        childId: childIdStr,
-        ownerId,
-      });
-      dealRecords.push({ deal: dealRecord, childRecord });
-      console.log(`[detailed-form] Created deal ${dealRecord.id} for ${child.first_name}`);
-    } catch (err) {
-      console.error(`[detailed-form] Error creating child/deal ${i + 1}:`, err.message);
-    }
-  }
+      const assocPromises = [];
+      assocPromises.push(hubspot.associateChildWithContact(created.id, contactId));
+      if (householdRecordId) {
+        assocPromises.push(hubspot.associateChildWithHousehold(created.id, householdRecordId));
+      }
+      await Promise.all(assocPromises);
 
-  // ── STEP 6: Create all associations ──
-  // Contact ↔ Household (always)
-  await hubspot.createAllAssociations({ contactId, householdRecordId });
-
-  // For each child+deal pair, create the remaining associations
-  for (const { deal, childRecord } of dealRecords) {
-    try {
-      await hubspot.createAllAssociations({
+      const dealName = `${child.first_name} ${child.last_name} | ${year}`;
+      const deal = await hubspot.createDeal({
         contactId,
-        householdRecordId,
-        childRecordId: childRecord.id,
-        dealRecordId: deal.id,
+        ownerId: routingResult.expertId,
+        dealName,
+        householdId: householdRecordId || null,
+        childId: created.id,
       });
-      console.log(`[detailed-form] Associations created for deal ${deal.id} / child ${childRecord.id}`);
-    } catch (err) {
-      console.error(`[detailed-form] Association error:`, err.message);
-    }
-  }
+      console.log(`[detailed-form] Created deal ${deal.id} for ${dealName}`);
 
-  // ── Notifications (speed to lead — fire in parallel) ──
+      return { childId: created.id, dealId: deal.id };
+    } catch (err) {
+      console.error(`[detailed-form] Error creating child/deal for ${child.first_name}:`, err.message);
+      return null;
+    }
+  });
+
+  const childDealResults = await Promise.all(childDealPromises);
+
   await Promise.all([
     sendExpertNotification({
-      expertOwnerId: ownerId,
+      expertOwnerId: routingResult.expertId,
       lead: normalized,
       children,
       isReturningFamily,
@@ -329,7 +325,7 @@ async function handleDetailedForm(normalized, rawPayload) {
     }),
 
     sendExpertSms({
-      expertOwnerId: ownerId,
+      expertOwnerId: routingResult.expertId,
       familyName,
       location: normalized.zip || normalized.country || 'Unknown',
       isReturningFamily,
@@ -341,52 +337,45 @@ async function handleDetailedForm(normalized, rawPayload) {
       expertName: expert?.name || 'Camp Experts',
     }),
 
-    db.logAssignment({
+    sb.logAssignment({
       contactId,
       contactEmail: email,
       contactName: familyName,
-      expertOwnerId: ownerId,
+      expertOwnerId: routingResult.expertId,
       expertName: expert?.name || 'Unknown',
       routingRule: routingResult.rule,
       zip: normalized.zip,
       country: normalized.country,
       phone: normalized.phone,
-      leadSource: leadSource.lead_source,
+      leadSource: leadSource.lead_source || null,
       leadSourceDetail: leadSource,
       rawPayload,
     }),
 
-    // Clean up pending lead if it exists
     pendingLead
-      ? db.deletePendingLead(pendingLead.id).then(() =>
+      ? sb.deletePendingLead(pendingLead.id).then(() =>
           console.log(`[detailed-form] Deleted pending lead ${pendingLead.id}`))
       : Promise.resolve(),
   ]);
 
-  console.log(`[detailed-form] Complete: ${familyName} → ${expert?.name || ownerId}`);
+  console.log(`[detailed-form] Complete: ${familyName} → ${expert?.name || routingResult.expertId}`);
 }
 
-// ── 4-Minute Timeout Handler ──
-async function handleTimeout(pendingLeadId, contactId, householdRecordId, email, normalized) {
+async function handleTimeout(pendingLeadId, contactId, email, normalized) {
   try {
-    const pending = await db.findPendingLeadByEmail(email);
+    const pending = await sb.findPendingLeadByEmail(email);
     if (!pending || pending.id !== pendingLeadId) {
       console.log(`[timeout] Pending lead ${pendingLeadId} already processed, skipping`);
       return;
     }
 
     console.log(`[timeout] No detailed form for ${email}, assigning to office`);
+
     const expert = EXPERTS[CAMP_EXPERTS_OFFICE_ID];
-    const leadSource = extractLeadSource(pending.raw_payload || {});
+    const familyName = `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email;
+    const householdRecordId = pending.raw_payload?._householdRecordId;
 
-    // Update household owner to office
-    if (householdRecordId) {
-      await hubspot.updateHousehold(householdRecordId, {
-        hubspot_owner_id: CAMP_EXPERTS_OFFICE_ID,
-      }).catch(err => console.error(`[timeout] Failed to update household owner:`, err.message));
-    }
-
-    await Promise.all([
+    const promises = [
       hubspot.setContactOwner(contactId, CAMP_EXPERTS_OFFICE_ID),
 
       sendExpertNotification({
@@ -397,29 +386,35 @@ async function handleTimeout(pendingLeadId, contactId, householdRecordId, email,
 
       sendExpertSms({
         expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
-        familyName: `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email,
+        familyName,
         location: normalized.zip || normalized.country || 'Unknown',
       }),
 
-      db.logAssignment({
+      sb.logAssignment({
         contactId,
         contactEmail: email,
-        contactName: `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim(),
+        contactName: familyName,
         expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
         expertName: expert?.name || 'Camp Experts Office',
         routingRule: 'timeout_fallback',
         phone: normalized.phone,
-        leadSource: leadSource.lead_source,
-        leadSourceDetail: leadSource,
         rawPayload: normalized,
       }),
 
-      db.deletePendingLead(pendingLeadId),
-    ]);
+      sb.deletePendingLead(pendingLeadId),
+    ];
+
+    if (householdRecordId) {
+      promises.push(
+        hubspot.updateHousehold(householdRecordId, { hubspot_owner_id: CAMP_EXPERTS_OFFICE_ID })
+          .catch(err => console.error(`[timeout] Failed to update household owner:`, err.message))
+      );
+    }
+
+    await Promise.all(promises);
 
     console.log(`[timeout] Assigned ${email} to Camp Experts Office (timeout)`);
 
-    // Schedule follow-up email 6 minutes later
     setTimeout(() => {
       sendTimeoutFollowUp({
         email,
@@ -432,26 +427,17 @@ async function handleTimeout(pendingLeadId, contactId, householdRecordId, email,
   }
 }
 
-// ── Periodic cleanup: check for expired pending leads ──
 setInterval(async () => {
   try {
-    const expired = await db.getExpiredPendingLeads(4);
+    const expired = await sb.getExpiredPendingLeads(4);
     for (const lead of expired) {
       console.log(`[cleanup] Found expired pending lead: ${lead.email}`);
       try {
         if (lead.contact_id) {
           await hubspot.setContactOwner(lead.contact_id, CAMP_EXPERTS_OFFICE_ID);
         }
-        // Update household owner if we stored the record ID
-        const hhRecordId = lead.raw_payload?._householdRecordId;
-        if (hhRecordId) {
-          await hubspot.updateHousehold(hhRecordId, {
-            hubspot_owner_id: CAMP_EXPERTS_OFFICE_ID,
-          }).catch(err => console.error(`[cleanup] Failed to update household:`, err.message));
-        }
-
         const expert = EXPERTS[CAMP_EXPERTS_OFFICE_ID];
-        await db.logAssignment({
+        await sb.logAssignment({
           contactId: lead.contact_id || 'unknown',
           contactEmail: lead.email,
           contactName: null,
@@ -461,8 +447,7 @@ setInterval(async () => {
           phone: lead.phone,
           rawPayload: lead.raw_payload,
         });
-        await db.deletePendingLead(lead.id);
-
+        await sb.deletePendingLead(lead.id);
         const leadEmail = lead.email;
         const leadFirstName = lead.raw_payload?.first_name || lead.raw_payload?.First_Name;
         setTimeout(() => {
@@ -479,11 +464,10 @@ setInterval(async () => {
   }
 }, 5 * 60 * 1000);
 
-// ── Start Server ──
 const PORT = process.env.PORT || 5000;
 
 async function start() {
-  await db.initDatabase();
+  await sb.initDatabase();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Camp Experts Lead Routing Engine running on port ${PORT}`);
   });
