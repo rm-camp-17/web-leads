@@ -1,9 +1,51 @@
 const { Resend } = require('resend');
+const Anthropic = require('@anthropic-ai/sdk');
 const { EXPERTS } = require('./routing-config');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-async function sendExpertNotification({ expertOwnerId, lead, children }) {
+// ── AI Personalization ──
+
+let anthropic;
+try {
+  if (process.env.ANTHROPIC_API_KEY) {
+    anthropic = new Anthropic();
+  }
+} catch {
+  // SDK not available or key not set — personalization will fall back to description as-is
+}
+
+async function generatePersonalNote(description) {
+  if (!description || !description.trim()) return null;
+
+  if (!anthropic) {
+    // No API key — return the raw description as the personal note
+    return description.trim();
+  }
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 150,
+      messages: [{
+        role: 'user',
+        content: `You are writing a brief internal note for a camp placement expert. A parent submitted this message on a camp inquiry form:
+
+"${description}"
+
+Write 1-2 short sentences summarizing what this family is looking for, in a warm but professional tone. Focus on the key details (child's age, interests, concerns, what kind of camp). Do not start with "The family" or "This parent" — start directly with what matters. Keep it under 40 words.`,
+      }],
+    });
+    return response.content[0]?.text || description.trim();
+  } catch (err) {
+    console.error('AI personalization failed, using raw description:', err.message);
+    return description.trim();
+  }
+}
+
+// ── Expert Notification (with returning family + personalization) ──
+
+async function sendExpertNotification({ expertOwnerId, lead, children, isReturningFamily }) {
   const expert = EXPERTS[expertOwnerId];
   if (!expert) {
     console.error(`No expert found for owner ID: ${expertOwnerId}`);
@@ -12,6 +54,9 @@ async function sendExpertNotification({ expertOwnerId, lead, children }) {
 
   const familyName = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Unknown';
   const location = lead.zip || lead.country || 'Not provided';
+
+  // Generate personalized note from description
+  const personalNote = await generatePersonalNote(lead.description);
 
   let childDetails = 'None provided';
   if (children && children.length > 0) {
@@ -29,8 +74,12 @@ async function sendExpertNotification({ expertOwnerId, lead, children }) {
   }
 
   const sourceInfo = lead.source_url ? `\nSource Page: ${lead.source_url}` : '';
+  const returningLabel = isReturningFamily ? ' (Returning Family)' : '';
 
-  const text = `New Lead Assigned to You
+  const subjectPrefix = isReturningFamily ? 'Returning Family' : 'New Lead';
+  const subject = `${subjectPrefix}: ${familyName} - ${location}`;
+
+  const text = `${subjectPrefix} Assigned to You${returningLabel}
 
 Family: ${familyName}
 Email: ${lead.email || 'N/A'}
@@ -39,6 +88,7 @@ Zip: ${lead.zip || 'N/A'}
 Country: ${lead.country || 'N/A'}
 ${sourceInfo}
 
+${personalNote ? `Quick Summary: ${personalNote}\n` : ''}
 Children:
 ${childDetails}
 
@@ -47,7 +97,15 @@ ${lead.description || 'None provided'}
 `;
 
   const html = `
-<h2>New Lead Assigned to You</h2>
+${isReturningFamily ? '<p style="background:#fff3cd;padding:8px 12px;border-radius:4px;font-weight:bold;color:#856404;">Returning Family — previously worked with you</p>' : ''}
+<h2>${esc(subjectPrefix)} Assigned to You</h2>
+
+${personalNote ? `
+<div style="background:#e8f4f8;padding:10px 14px;border-radius:6px;margin-bottom:16px;border-left:3px solid #2b6cb0;">
+  <strong>At a Glance:</strong> ${esc(personalNote)}
+</div>
+` : ''}
+
 <table style="border-collapse:collapse;font-family:Arial,sans-serif;">
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Family:</td><td>${esc(familyName)}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Email:</td><td><a href="mailto:${esc(lead.email || '')}">${esc(lead.email || 'N/A')}</a></td></tr>
@@ -81,7 +139,7 @@ ${children.map((child, i) => {
     await resend.emails.send({
       from: 'Camp Experts <office@campexperts.com>',
       to: expert.email,
-      subject: `New Lead: ${familyName} - ${location}`,
+      subject,
       text,
       html,
     });
@@ -90,6 +148,102 @@ ${children.map((child, i) => {
     console.error(`Failed to send notification to ${expert.email}:`, err.message);
   }
 }
+
+// ── Family Acknowledgment Email ──
+
+async function sendFamilyAcknowledgment({ email, firstName, expertName }) {
+  const name = firstName || 'there';
+
+  const html = `
+<div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#333;">
+  <p>Hi ${esc(name)},</p>
+
+  <p>Thank you so much for reaching out to us. We're excited to help your family find the perfect camp experience.</p>
+
+  <p>Your dedicated Camp Expert, <strong>${esc(expertName)}</strong>, has received your information and will be reaching out to you shortly. ${esc(expertName.split(' ')[0])} will take the time to understand your family's needs and help match you with programs that are the right fit.</p>
+
+  <p>In the meantime, feel free to reply to this email if you have any questions at all.</p>
+
+  <p>
+    Warm regards,<br/>
+    The Camp Experts Team
+  </p>
+</div>
+`;
+
+  const text = `Hi ${name},
+
+Thank you so much for reaching out to us. We're excited to help your family find the perfect camp experience.
+
+Your dedicated Camp Expert, ${expertName}, has received your information and will be reaching out to you shortly. ${expertName.split(' ')[0]} will take the time to understand your family's needs and help match you with programs that are the right fit.
+
+In the meantime, feel free to reply to this email if you have any questions at all.
+
+Warm regards,
+The Camp Experts Team`;
+
+  try {
+    await resend.emails.send({
+      from: 'Camp Experts <hey@campexperts.com>',
+      to: email,
+      subject: `We've got you covered, ${name}`,
+      text,
+      html,
+    });
+    console.log(`Family acknowledgment sent to ${email}`);
+  } catch (err) {
+    console.error(`Failed to send family acknowledgment to ${email}:`, err.message);
+  }
+}
+
+// ── Timeout Follow-Up Email ──
+
+async function sendTimeoutFollowUp({ email, firstName }) {
+  const name = firstName || 'there';
+
+  const html = `
+<div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#333;">
+  <p>Hi ${esc(name)},</p>
+
+  <p>We noticed you started reaching out to us and wanted to make sure everything is okay. Finding the right camp is one of those decisions that can feel overwhelming, but it doesn't have to be.</p>
+
+  <p>Camp is such a special experience for families. Our experts are all parents themselves who have been through this process, and they genuinely love helping other families navigate it. There's nothing quite like watching your child come home from a summer that changed them for the better.</p>
+
+  <p>If you had any trouble with the form, or if you'd just prefer to chat, we're here. You can reply to this email or give us a call — no pressure at all. We'd love the chance to help.</p>
+
+  <p>
+    Warmly,<br/>
+    The Camp Experts Team
+  </p>
+</div>
+`;
+
+  const text = `Hi ${name},
+
+We noticed you started reaching out to us and wanted to make sure everything is okay. Finding the right camp is one of those decisions that can feel overwhelming, but it doesn't have to be.
+
+Camp is such a special experience for families. Our experts are all parents themselves who have been through this process, and they genuinely love helping other families navigate it. There's nothing quite like watching your child come home from a summer that changed them for the better.
+
+If you had any trouble with the form, or if you'd just prefer to chat, we're here. You can reply to this email or give us a call — no pressure at all. We'd love the chance to help.
+
+Warmly,
+The Camp Experts Team`;
+
+  try {
+    await resend.emails.send({
+      from: 'Camp Experts <hey@campexperts.com>',
+      to: email,
+      subject: `We're here whenever you're ready`,
+      text,
+      html,
+    });
+    console.log(`Timeout follow-up sent to ${email}`);
+  } catch (err) {
+    console.error(`Failed to send timeout follow-up to ${email}:`, err.message);
+  }
+}
+
+// ── Helpers ──
 
 function calculateAge(birthDateStr) {
   const birth = new Date(birthDateStr);
@@ -111,4 +265,8 @@ function esc(str) {
     .replace(/"/g, '&quot;');
 }
 
-module.exports = { sendExpertNotification };
+module.exports = {
+  sendExpertNotification,
+  sendFamilyAcknowledgment,
+  sendTimeoutFollowUp,
+};

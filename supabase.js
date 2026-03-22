@@ -39,12 +39,12 @@ async function findPendingLeadByEmail(email) {
 
 // Check for duplicate short-form within 60 seconds
 async function isDuplicateShortForm(email) {
-  const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
+  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60_000).toISOString();
   const { data, error } = await supabase
     .from('pending_leads')
     .select('id')
     .eq('email', email.toLowerCase())
-    .gte('created_at', oneMinuteAgo)
+    .gte('created_at', sixHoursAgo)
     .limit(1)
     .maybeSingle();
 
@@ -140,7 +140,7 @@ async function getNextManhattanExpert() {
 
 // ── Expired Pending Leads (for timeout handler) ──
 
-async function getExpiredPendingLeads(minutesOld = 10) {
+async function getExpiredPendingLeads(minutesOld = 4) {
   const cutoff = new Date(Date.now() - minutesOld * 60_000).toISOString();
   const { data, error } = await supabase
     .from('pending_leads')

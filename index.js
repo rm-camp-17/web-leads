@@ -3,7 +3,7 @@ const { normalizeFields, isDetailedForm, extractChildren } = require('./field-no
 const hubspot = require('./hubspot');
 const sb = require('./supabase');
 const { routeLead } = require('./routing-engine');
-const { sendExpertNotification } = require('./notifications');
+const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp } = require('./notifications');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
 
 const app = express();
@@ -78,10 +78,10 @@ async function handleShortForm(normalized, rawPayload) {
   const email = normalized.email.toLowerCase();
   console.log(`[short-form] Processing for ${email}`);
 
-  // Idempotency: skip if we already have a pending lead for this email within 60s
+  // Idempotency: skip if we already have a pending lead for this email within 6 hours
   const isDupe = await sb.isDuplicateShortForm(email);
   if (isDupe) {
-    console.log(`[short-form] Duplicate within 60s for ${email}, skipping`);
+    console.log(`[short-form] Duplicate within 6h for ${email}, skipping`);
     return;
   }
 
@@ -118,8 +118,8 @@ async function handleShortForm(normalized, rawPayload) {
 
   // Start 10-minute timeout
   const pendingId = pendingLead.id;
-  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 10 * 60 * 1000);
-  console.log(`[short-form] Started 10-minute timeout for ${email}`);
+  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 4 * 60 * 1000);
+  console.log(`[short-form] Started 4-minute timeout for ${email}`);
 }
 
 // ── Detailed Form Handler ──
@@ -184,50 +184,62 @@ async function handleDetailedForm(normalized, rawPayload) {
   const routingResult = await routeLead(normalized);
   console.log(`[detailed-form] Routing result:`, routingResult);
 
-  // Set contact owner
+  const isReturningFamily = routingResult.rule.startsWith('existing_family');
+  const familyName = `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email;
+  const expert = EXPERTS[routingResult.expertId];
+
+  // Set contact owner (must happen before deal)
   await hubspot.setContactOwner(contactId, routingResult.expertId);
 
-  // Create deal
-  const familyName = `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim() || email;
-  await hubspot.createDeal({
-    contactId,
-    ownerId: routingResult.expertId,
-    familyName,
-  });
-  console.log(`[detailed-form] Created deal for ${familyName}`);
+  // Speed to lead: fire notification, deal creation, logging, and family acknowledgment in parallel
+  await Promise.all([
+    // Expert notification (the conversion-critical moment)
+    sendExpertNotification({
+      expertOwnerId: routingResult.expertId,
+      lead: normalized,
+      children,
+      isReturningFamily,
+    }),
 
-  // Send notification email
-  await sendExpertNotification({
-    expertOwnerId: routingResult.expertId,
-    lead: normalized,
-    children,
-  });
+    // Family acknowledgment — let them know their expert by name
+    sendFamilyAcknowledgment({
+      email,
+      firstName: normalized.first_name,
+      expertName: expert?.name || 'Camp Experts',
+    }),
 
-  // Log assignment
-  const expert = EXPERTS[routingResult.expertId];
-  await sb.logAssignment({
-    contactId,
-    contactEmail: email,
-    contactName: familyName,
-    expertOwnerId: routingResult.expertId,
-    expertName: expert?.name || 'Unknown',
-    routingRule: routingResult.rule,
-    zip: normalized.zip,
-    country: normalized.country,
-    phone: normalized.phone,
-    rawPayload,
-  });
+    // Create deal
+    hubspot.createDeal({
+      contactId,
+      ownerId: routingResult.expertId,
+      familyName,
+    }).then(() => console.log(`[detailed-form] Created deal for ${familyName}`)),
 
-  // Clean up pending lead if it exists
-  if (pendingLead) {
-    await sb.deletePendingLead(pendingLead.id);
-    console.log(`[detailed-form] Deleted pending lead ${pendingLead.id}`);
-  }
+    // Log assignment
+    sb.logAssignment({
+      contactId,
+      contactEmail: email,
+      contactName: familyName,
+      expertOwnerId: routingResult.expertId,
+      expertName: expert?.name || 'Unknown',
+      routingRule: routingResult.rule,
+      zip: normalized.zip,
+      country: normalized.country,
+      phone: normalized.phone,
+      rawPayload,
+    }),
+
+    // Clean up pending lead if it exists
+    pendingLead
+      ? sb.deletePendingLead(pendingLead.id).then(() =>
+          console.log(`[detailed-form] Deleted pending lead ${pendingLead.id}`))
+      : Promise.resolve(),
+  ]);
 
   console.log(`[detailed-form] Complete: ${familyName} → ${expert?.name || routingResult.expertId}`);
 }
 
-// ── 10-Minute Timeout Handler ──
+// ── 4-Minute Timeout Handler ──
 async function handleTimeout(pendingLeadId, contactId, email, normalized) {
   try {
     // Check if the pending lead still exists (not yet processed by detailed form)
@@ -239,25 +251,43 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
 
     console.log(`[timeout] No detailed form for ${email}, assigning to office`);
 
-    // Assign to Camp Experts Office
-    await hubspot.setContactOwner(contactId, CAMP_EXPERTS_OFFICE_ID);
-
-    // Log assignment
+    // Assign to Camp Experts Office and notify them
     const expert = EXPERTS[CAMP_EXPERTS_OFFICE_ID];
-    await sb.logAssignment({
-      contactId,
-      contactEmail: email,
-      contactName: `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim(),
-      expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
-      expertName: expert?.name || 'Camp Experts Office',
-      routingRule: 'timeout_fallback',
-      phone: normalized.phone,
-      rawPayload: normalized,
-    });
 
-    // Delete pending lead
-    await sb.deletePendingLead(pendingLeadId);
+    await Promise.all([
+      hubspot.setContactOwner(contactId, CAMP_EXPERTS_OFFICE_ID),
+
+      // Notify the office so they can follow up manually
+      sendExpertNotification({
+        expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
+        lead: normalized,
+        children: [],
+      }),
+
+      sb.logAssignment({
+        contactId,
+        contactEmail: email,
+        contactName: `${normalized.first_name || ''} ${normalized.last_name || ''}`.trim(),
+        expertOwnerId: CAMP_EXPERTS_OFFICE_ID,
+        expertName: expert?.name || 'Camp Experts Office',
+        routingRule: 'timeout_fallback',
+        phone: normalized.phone,
+        rawPayload: normalized,
+      }),
+
+      sb.deletePendingLead(pendingLeadId),
+    ]);
+
     console.log(`[timeout] Assigned ${email} to Camp Experts Office (timeout)`);
+
+    // Schedule follow-up email to the family 6 minutes after timeout
+    setTimeout(() => {
+      sendTimeoutFollowUp({
+        email,
+        firstName: normalized.first_name,
+      }).catch(err => console.error(`[timeout-followup] Error for ${email}:`, err.message));
+    }, 6 * 60 * 1000);
+    console.log(`[timeout] Scheduled follow-up email to ${email} in 6 minutes`);
   } catch (err) {
     console.error(`[timeout] Error handling timeout for ${email}:`, err.message);
   }
@@ -267,7 +297,7 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
 // Runs every 5 minutes as a safety net in case a setTimeout was lost (e.g., server restart)
 setInterval(async () => {
   try {
-    const expired = await sb.getExpiredPendingLeads(10);
+    const expired = await sb.getExpiredPendingLeads(4);
     for (const lead of expired) {
       console.log(`[cleanup] Found expired pending lead: ${lead.email}`);
       try {
@@ -286,6 +316,13 @@ setInterval(async () => {
           rawPayload: lead.raw_payload,
         });
         await sb.deletePendingLead(lead.id);
+        // Schedule follow-up email to the family 6 minutes later
+        const leadEmail = lead.email;
+        const leadFirstName = lead.raw_payload?.first_name || lead.raw_payload?.First_Name;
+        setTimeout(() => {
+          sendTimeoutFollowUp({ email: leadEmail, firstName: leadFirstName })
+            .catch(err => console.error(`[cleanup-followup] Error for ${leadEmail}:`, err.message));
+        }, 6 * 60 * 1000);
         console.log(`[cleanup] Processed expired lead ${lead.email}`);
       } catch (err) {
         console.error(`[cleanup] Error processing expired lead ${lead.email}:`, err.message);
