@@ -490,6 +490,50 @@ const AREA_CODE_ROUTES = {
 const HUBSPOT_CHILD_OBJECT_ID = '2-50911061';
 const HUBSPOT_HOUSEHOLD_OBJECT_ID = '2-53610744';
 
+// Expert profiles for AI-powered routing fallback
+// When ZIP/area code don't match, AI uses these to pick the best expert
+const EXPERT_PROFILES = {
+  '87283296': { regions: ['South Florida', 'Miami-Dade', 'Aventura', 'Hollywood FL'], specialty: 'South Florida families, Turkish expats' },
+  '87283278': { regions: ['France', 'Spain', 'Germany', 'Central Europe'], specialty: 'European families, French-speaking' },
+  '87283274': { regions: ['Philadelphia', 'Delaware', 'Central PA', 'UWS Manhattan'], specialty: 'Philadelphia metro, Delaware, Lehigh Valley' },
+  '87283313': { regions: ['Westchester NY'], specialty: 'Westchester County families' },
+  '87283276': { regions: ['South America', 'Latin America', 'Argentina', 'Brazil'], specialty: 'Latin American families, Spanish-speaking' },
+  '87283325': { regions: ['Manhattan'], specialty: 'Manhattan families (rotation)' },
+  '87283267': { regions: ['Manhattan'], specialty: 'Manhattan families (rotation)' },
+  '87283293': { regions: ['Philadelphia suburbs', 'Chester County', 'Montgomery County PA'], specialty: 'Philly western suburbs' },
+  '87283300': { regions: ['Italy', 'Monaco'], specialty: 'Italian families' },
+  '87283277': { regions: ['United Kingdom', 'Ireland', 'Middle East', 'Gulf States'], specialty: 'UK, Ireland, Middle East families' },
+  '87283304': { regions: ['DC', 'Virginia', 'North Carolina', 'Texas', 'Pittsburgh'], specialty: 'DC/Virginia metro, Carolinas, Texas' },
+  '87283272': { regions: ['Connecticut', 'Fairfield County'], specialty: 'Connecticut families' },
+  '87283316': { regions: ['Israel'], specialty: 'Israeli families' },
+  '87283269': { regions: ['Tampa', 'Central Florida'], specialty: 'Tampa Bay, Central Florida' },
+  '87283309': { regions: ['Westchester NY', 'White Plains', 'Tarrytown'], specialty: 'Northern Westchester' },
+  '87283320': { regions: ['Northern New Jersey', 'Essex County NJ'], specialty: 'North Jersey, Essex County' },
+  '87283284': { regions: ['Westport CT', 'Greenwich CT'], specialty: 'Fairfield County gold coast' },
+  '87283324': { regions: ['Georgia', 'Atlanta', 'Tennessee', 'South Carolina', 'Alabama'], specialty: 'Southeast US' },
+  '87283280': { regions: ['Bergen County NJ', 'Northern NJ'], specialty: 'Bergen County, North Jersey' },
+  '87283265': { regions: ['South Miami', 'Coral Gables', 'Coconut Grove'], specialty: 'South Miami, Coral Gables' },
+  '87283287': { regions: ['Scarsdale NY', 'Westchester'], specialty: 'Scarsdale area' },
+  '87283318': { regions: ['North Shore Chicago', 'Highland Park IL', 'Illinois suburbs'], specialty: 'Chicago North Shore, broader IL suburbs' },
+  '87283323': { regions: ['Southern Westchester', 'Larchmont', 'Mamaroneck', 'New Rochelle'], specialty: 'Southern Westchester' },
+  '87283317': { regions: ['Peru', 'South America'], specialty: 'Peruvian families' },
+  '87283301': { regions: ['Nassau County', 'Long Island'], specialty: 'Nassau County, Long Island' },
+  '87283312': { regions: ['Baltimore', 'Maryland'], specialty: 'Baltimore metro, Maryland' },
+  '87283297': { regions: ['Westfield NJ'], specialty: 'Westfield NJ area' },
+  '87283275': { regions: ['Deerfield IL', 'Northbrook IL', 'Lake Forest IL'], specialty: 'Chicago North Shore specific suburbs' },
+  '87283305': { regions: ['Boca Raton', 'Palm Beach', 'North Broward'], specialty: 'Palm Beach, Boca, North Broward' },
+  '87283314': { regions: ['Maplewood NJ'], specialty: 'Maplewood NJ area' },
+  '87283307': { regions: ['Port Washington NY', 'Long Island'], specialty: 'Port Washington area' },
+  '87487512': { regions: ['Colombia'], specialty: 'Colombian families' },
+  '87283291': { regions: ['Colorado', 'Denver', 'Pacific Northwest', 'Washington', 'Oregon'], specialty: 'Colorado, Pacific Northwest' },
+  '87283273': { regions: ['Ohio', 'Michigan', 'Wisconsin', 'Minnesota'], specialty: 'Upper Midwest' },
+  '87283289': { regions: ['Suffolk County', 'Long Island'], specialty: 'Suffolk County, Eastern Long Island' },
+  '87283281': { regions: ['California', 'Los Angeles', 'San Francisco', 'Bay Area'], specialty: 'All of California' },
+  '87283303': { regions: ['Cooper City FL', 'Pembroke Pines', 'Southwest Broward'], specialty: 'Southwest Broward County' },
+  '87283268': { regions: ['Chicago city'], specialty: 'City of Chicago proper' },
+  '87283310': { regions: ['Livingston NJ'], specialty: 'Livingston NJ area' },
+};
+
 module.exports = {
   EXPERTS,
   EXCLUDED_OWNER_IDS,
@@ -504,6 +548,7 @@ module.exports = {
   INTERNATIONAL_FALLBACK,
   ZIP_ROUTES,
   AREA_CODE_ROUTES,
+  EXPERT_PROFILES,
   HUBSPOT_CHILD_OBJECT_ID,
   HUBSPOT_HOUSEHOLD_OBJECT_ID,
 };

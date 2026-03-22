@@ -1,6 +1,14 @@
 const hubspot = require('./hubspot');
 const supabase = require('./db');
 const config = require('./routing-config');
+const Anthropic = require('@anthropic-ai/sdk');
+
+let anthropic;
+try {
+  if (process.env.ANTHROPIC_API_KEY) {
+    anthropic = new Anthropic();
+  }
+} catch {};
 
 // Main entry point: takes a normalized lead, returns { expertId, rule }
 async function routeLead(lead) {
@@ -21,7 +29,11 @@ async function routeLead(lead) {
     const domesticResult = await checkDomestic(lead.zip, lead.phone);
     if (domesticResult) return domesticResult;
 
-    // Step 5: Fallback
+    // Step 5: AI-powered routing (when geographic rules don't match)
+    const aiResult = await tryAiRouting(lead);
+    if (aiResult) return aiResult;
+
+    // Step 6: Fallback
     return { expertId: config.CAMP_EXPERTS_OFFICE_ID, rule: 'fallback_no_match' };
   } catch (err) {
     console.error('Routing engine error, falling back to office:', err.message);
@@ -208,6 +220,68 @@ async function getExpertByAreaCode(phone) {
   }
 
   return { expertId, rule: `area_code_${areaCode}` };
+}
+
+// Step 5: AI-powered routing when geographic rules don't match
+async function tryAiRouting(lead) {
+  if (!anthropic) return null;
+
+  // Build lead summary
+  const leadParts = [];
+  if (lead.zip) leadParts.push(`ZIP: ${lead.zip}`);
+  if (lead.country) leadParts.push(`Country: ${lead.country}`);
+  if (lead.phone) leadParts.push(`Phone: ${lead.phone}`);
+  if (lead.city) leadParts.push(`City: ${lead.city}`);
+  if (lead.address) leadParts.push(`Address: ${lead.address}`);
+  if (lead.description) leadParts.push(`Notes: ${lead.description}`);
+
+  if (leadParts.length === 0) return null;
+
+  // Build expert options (exclude office, Manhattan rotation entries, and experts without profiles)
+  const expertOptions = [];
+  for (const [id, profile] of Object.entries(config.EXPERT_PROFILES)) {
+    const expert = config.EXPERTS[id];
+    if (!expert || id === config.CAMP_EXPERTS_OFFICE_ID) continue;
+    expertOptions.push(`ID:${id} | ${expert.name} | Regions: ${profile.regions.join(', ')} | Specialty: ${profile.specialty}`);
+  }
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 100,
+      messages: [{
+        role: 'user',
+        content: `You are a lead routing assistant for Camp Experts, a summer camp placement service. A new lead came in but didn't match any geographic routing rules. Pick the BEST expert based on geographic proximity and specialty match.
+
+Lead info:
+${leadParts.join('\n')}
+
+Available experts:
+${expertOptions.join('\n')}
+
+Reply with ONLY the expert ID number (e.g., 87283304) of the best match. If no expert is a reasonable match, reply "NONE".`,
+      }],
+    });
+
+    const answer = (response.content[0]?.text || '').trim();
+
+    if (answer === 'NONE') return null;
+
+    // Extract the ID from the response
+    const idMatch = answer.match(/\d{8,}/);
+    if (!idMatch) return null;
+
+    const expertId = idMatch[0];
+    if (config.EXPERTS[expertId] && expertId !== config.CAMP_EXPERTS_OFFICE_ID) {
+      console.log(`[routing] AI routing matched: ${config.EXPERTS[expertId].name} (${expertId})`);
+      return { expertId, rule: `ai_routing_${expertId}` };
+    }
+
+    return null;
+  } catch (err) {
+    console.error('[routing] AI routing failed, skipping:', err.message);
+    return null;
+  }
 }
 
 // Test-only export: run routing without HubSpot side effects

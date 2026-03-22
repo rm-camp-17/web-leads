@@ -102,4 +102,70 @@ function mapBudget(value) {
   return mapped || value; // Pass through if already numeric
 }
 
-module.exports = { normalizeFields, isDetailedForm, extractChildren, mapBudget };
+// Extract lead source attribution from form data
+// Webflow can pass UTM params, referrer, and page URL as hidden fields
+function extractLeadSource(payload) {
+  const source = {};
+
+  // Source URL (the page the form was on)
+  const sourceUrl = payload.source_url || payload.source || payload.Source || payload['Source URL'] || payload.page_url || null;
+  if (sourceUrl) source.source_url = sourceUrl;
+
+  // UTM parameters (commonly passed as hidden fields in Webflow forms)
+  const utmFields = {
+    utm_source: ['utm_source', 'UTM Source', 'UTM_Source'],
+    utm_medium: ['utm_medium', 'UTM Medium', 'UTM_Medium'],
+    utm_campaign: ['utm_campaign', 'UTM Campaign', 'UTM_Campaign'],
+    utm_term: ['utm_term', 'UTM Term', 'UTM_Term'],
+    utm_content: ['utm_content', 'UTM Content', 'UTM_Content'],
+  };
+
+  for (const [normalized, variants] of Object.entries(utmFields)) {
+    for (const variant of variants) {
+      if (payload[variant] && String(payload[variant]).trim()) {
+        source[normalized] = String(payload[variant]).trim();
+        break;
+      }
+    }
+  }
+
+  // Try to parse UTM params from source_url if not provided as separate fields
+  if (sourceUrl && !source.utm_source) {
+    try {
+      const url = new URL(sourceUrl);
+      for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
+        const val = url.searchParams.get(key);
+        if (val) source[key] = val;
+      }
+    } catch {
+      // Not a valid URL, skip
+    }
+  }
+
+  // Referrer
+  const referrer = payload.referrer || payload.Referrer || payload.referring_url || null;
+  if (referrer) source.referrer = referrer;
+
+  // Form ID / form name (Webflow sometimes includes these)
+  const formName = payload._formName || payload.formName || payload['Form Name'] || null;
+  if (formName) source.form_name = formName;
+
+  // Derive a human-readable lead_source label
+  if (source.utm_source) {
+    source.lead_source = source.utm_source;
+    if (source.utm_medium) source.lead_source += ` / ${source.utm_medium}`;
+  } else if (source.source_url) {
+    try {
+      const url = new URL(source.source_url);
+      source.lead_source = `website: ${url.pathname}`;
+    } catch {
+      source.lead_source = 'website';
+    }
+  } else {
+    source.lead_source = 'webflow_form';
+  }
+
+  return source;
+}
+
+module.exports = { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource };

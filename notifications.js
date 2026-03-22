@@ -50,34 +50,61 @@ try {
 } catch {
 }
 
-async function generatePersonalNote(description) {
-  if (!description || !description.trim()) return null;
-
+async function generatePersonalNote(lead, children) {
   if (!anthropic) {
-    return description.trim();
+    return lead.description ? lead.description.trim() : null;
   }
+
+  // Build a comprehensive summary of all lead data for the AI
+  const parts = [];
+
+  if (lead.zip) parts.push(`Location: ZIP ${lead.zip}`);
+  if (lead.country && lead.country.toLowerCase() !== 'united states') parts.push(`Country: ${lead.country}`);
+  if (lead.city) parts.push(`City: ${lead.city}`);
+
+  if (children && children.length > 0) {
+    for (const child of children) {
+      const childParts = [];
+      if (child.first_name) childParts.push(child.first_name);
+      if (child.birth_date) {
+        const age = calculateAge(child.birth_date);
+        childParts.push(`age ${age}`);
+      }
+      if (child.gender) childParts.push(child.gender.toLowerCase());
+      if (child.budget_per_week) childParts.push(`budget: ${child.budget_per_week}/week`);
+      if (child.session_length) childParts.push(`wants ${child.session_length}`);
+      if (child.interested_year) childParts.push(`for ${child.interested_year}`);
+      parts.push(`Child: ${childParts.join(', ')}`);
+    }
+  }
+
+  if (lead.description && lead.description.trim()) {
+    parts.push(`Parent notes: "${lead.description.trim()}"`);
+  }
+
+  if (parts.length === 0) return null;
 
   try {
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      max_tokens: 200,
       messages: [{
         role: 'user',
-        content: `You are writing a brief internal note for a camp placement expert. A parent submitted this message on a camp inquiry form:
+        content: `You are writing a brief internal briefing for a camp placement expert. Here is everything we know about a new family inquiry:
 
-"${description}"
+${parts.join('\n')}
 
-Write 1-2 short sentences summarizing what this family is looking for, in a warm but professional tone. Focus on the key details (child's age, interests, concerns, what kind of camp). Do not start with "The family" or "This parent" — start directly with what matters. Keep it under 40 words.`,
+Write 2-3 short sentences that give the expert a quick, actionable overview of this family's needs. Include the most important details: child age/gender, what they're looking for, budget level, session preference, and any notable concerns or interests from the parent's notes. Be warm but professional. Do not start with "The family" or "This parent" — start directly with what matters. Keep it under 60 words.`,
       }],
     });
-    return response.content[0]?.text || description.trim();
+    return response.content[0]?.text || (lead.description ? lead.description.trim() : null);
   } catch (err) {
     console.error('AI personalization failed, using raw description:', err.message);
-    return description.trim();
+    return lead.description ? lead.description.trim() : null;
   }
 }
 
-async function sendExpertNotification({ expertOwnerId, lead, children, isReturningFamily }) {
+async function sendExpertNotification({ expertOwnerId, lead, children, isReturningFamily, leadSource }) {
   const expert = EXPERTS[expertOwnerId];
   if (!expert) {
     console.error(`No expert found for owner ID: ${expertOwnerId}`);
@@ -87,7 +114,7 @@ async function sendExpertNotification({ expertOwnerId, lead, children, isReturni
   const familyName = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Unknown';
   const location = lead.zip || lead.country || 'Not provided';
 
-  const personalNote = await generatePersonalNote(lead.description);
+  const personalNote = await generatePersonalNote(lead, children);
 
   let childDetails = 'None provided';
   if (children && children.length > 0) {
@@ -104,7 +131,14 @@ async function sendExpertNotification({ expertOwnerId, lead, children, isReturni
     }).join('\n\n');
   }
 
-  const sourceInfo = lead.source_url ? `\nSource Page: ${lead.source_url}` : '';
+  // Build source attribution line
+  let sourceInfo = '';
+  if (leadSource && leadSource.lead_source) {
+    sourceInfo = `\nSource: ${leadSource.lead_source}`;
+    if (leadSource.utm_campaign) sourceInfo += ` (campaign: ${leadSource.utm_campaign})`;
+  } else if (lead.source_url) {
+    sourceInfo = `\nSource Page: ${lead.source_url}`;
+  }
   const returningLabel = isReturningFamily ? ' (Returning Family)' : '';
 
   const subjectPrefix = isReturningFamily ? 'Returning Family' : 'New Lead';
@@ -143,7 +177,11 @@ ${personalNote ? `
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Phone:</td><td>${esc(lead.phone || 'N/A')}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Zip:</td><td>${esc(lead.zip || 'N/A')}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Country:</td><td>${esc(lead.country || 'N/A')}</td></tr>
-  ${lead.source_url ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Source Page:</td><td>${esc(lead.source_url)}</td></tr>` : ''}
+  ${leadSource && leadSource.lead_source
+    ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Source:</td><td>${esc(leadSource.lead_source)}${leadSource.utm_campaign ? ` (campaign: ${esc(leadSource.utm_campaign)})` : ''}</td></tr>`
+    : lead.source_url
+      ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Source Page:</td><td>${esc(lead.source_url)}</td></tr>`
+      : ''}
 </table>
 
 ${children && children.length > 0 ? `

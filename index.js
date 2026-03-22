@@ -1,5 +1,5 @@
 const express = require('express');
-const { normalizeFields, isDetailedForm, extractChildren, mapBudget } = require('./field-normalizer');
+const { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource } = require('./field-normalizer');
 const hubspot = require('./hubspot');
 const db = require('./db');
 const { routeLead } = require('./routing-engine');
@@ -172,6 +172,8 @@ async function handleDetailedForm(normalized, rawPayload) {
 
   const lastName = normalized.last_name || '';
   const children = extractChildren(normalized);
+  const leadSource = extractLeadSource(rawPayload);
+  console.log(`[detailed-form] Lead source:`, leadSource);
 
   // Run routing engine first so we have the expert ID for all records
   const routingResult = await routeLead(normalized);
@@ -305,6 +307,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       lead: normalized,
       children,
       isReturningFamily,
+      leadSource,
     }),
 
     sendExpertSms({
@@ -330,6 +333,8 @@ async function handleDetailedForm(normalized, rawPayload) {
       zip: normalized.zip,
       country: normalized.country,
       phone: normalized.phone,
+      leadSource: leadSource.lead_source,
+      leadSourceDetail: leadSource,
       rawPayload,
     }),
 
@@ -354,6 +359,7 @@ async function handleTimeout(pendingLeadId, contactId, householdRecordId, email,
 
     console.log(`[timeout] No detailed form for ${email}, assigning to office`);
     const expert = EXPERTS[CAMP_EXPERTS_OFFICE_ID];
+    const leadSource = extractLeadSource(pending.raw_payload || {});
 
     // Update household owner to office
     if (householdRecordId) {
@@ -385,6 +391,8 @@ async function handleTimeout(pendingLeadId, contactId, householdRecordId, email,
         expertName: expert?.name || 'Camp Experts Office',
         routingRule: 'timeout_fallback',
         phone: normalized.phone,
+        leadSource: leadSource.lead_source,
+        leadSourceDetail: leadSource,
         rawPayload: normalized,
       }),
 

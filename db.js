@@ -32,6 +32,8 @@ async function initDatabase() {
         zip TEXT,
         country TEXT,
         phone TEXT,
+        lead_source TEXT,
+        lead_source_detail JSONB,
         raw_payload JSONB,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -39,6 +41,11 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_assignment_log_expert ON assignment_log(expert_owner_id);
       CREATE INDEX IF NOT EXISTS idx_assignment_log_created ON assignment_log(created_at);
       CREATE INDEX IF NOT EXISTS idx_assignment_log_rule ON assignment_log(routing_rule);
+      CREATE INDEX IF NOT EXISTS idx_assignment_log_source ON assignment_log(lead_source);
+
+      -- Migration: add lead_source columns to existing tables
+      ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS lead_source TEXT;
+      ALTER TABLE assignment_log ADD COLUMN IF NOT EXISTS lead_source_detail JSONB;
 
       CREATE TABLE IF NOT EXISTS manhattan_rotation (
         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -119,12 +126,14 @@ async function logAssignment({
   zip,
   country,
   phone,
+  leadSource,
+  leadSourceDetail,
   rawPayload,
 }) {
   const { rows } = await pool.query(
     `INSERT INTO assignment_log
-     (contact_id, contact_email, contact_name, expert_owner_id, expert_name, routing_rule, zip, country, phone, raw_payload)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     (contact_id, contact_email, contact_name, expert_owner_id, expert_name, routing_rule, zip, country, phone, lead_source, lead_source_detail, raw_payload)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING *`,
     [
       contactId,
@@ -136,6 +145,8 @@ async function logAssignment({
       zip || null,
       country || null,
       phone || null,
+      leadSource || null,
+      leadSourceDetail ? JSON.stringify(leadSourceDetail) : null,
       rawPayload ? JSON.stringify(rawPayload) : null,
     ]
   );
