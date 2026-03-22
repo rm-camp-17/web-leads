@@ -46,24 +46,24 @@ async function sendExpertSms({ expertOwnerId, familyName, phone, city, zip, coun
   const lines = [];
 
   if (isReturningFamily) {
-    lines.push(`NEW WEB LEAD - RETURNING FAMILY`);
+    lines.push(`🏕️ NEW WEB LEAD - RETURNING FAMILY`);
   } else {
-    lines.push(`NEW WEB LEAD`);
+    lines.push(`🏕️ NEW WEB LEAD`);
   }
-  lines.push(`Please reach out ASAP!`);
+  lines.push(`New family just came in — go get 'em!`);
   lines.push('');
 
   lines.push(`Parent: ${familyName}`);
   if (phone) lines.push(`Phone: ${phone}`);
   if (email) lines.push(`Email: ${email}`);
-  const locationParts = [city, zip, country].filter(Boolean);
+  const locationParts = [city, zip].filter(Boolean);
   if (locationParts.length) lines.push(`Location: ${locationParts.join(', ')}`);
   lines.push('');
 
   if (children && children.length > 0) {
     lines.push(children.length === 1 ? `Child:` : `Children:`);
     for (const child of children) {
-      lines.push(`  - ${formatChildLine(child)}`);
+      lines.push(`  ${formatChildLine(child)}`);
     }
   }
 
