@@ -68,15 +68,17 @@ async function sendExpertSms({ expertOwnerId, familyName, location, isReturningF
   const prefix = isReturningFamily ? 'Returning family' : 'New lead';
   const body = `${prefix}: ${familyName} (${location}). Check your email for details.`;
 
+  console.log(`[sms] Attempting to send from ${fromNumber} to ${expert.phone}`);
   try {
-    await client.messages.create({
+    const msg = await client.messages.create({
       body,
       from: fromNumber,
       to: expert.phone,
     });
-    console.log(`[sms] Text sent to ${expert.name} (${expert.phone})`);
+    console.log(`[sms] Text sent to ${expert.name} (${expert.phone}) — SID: ${msg.sid}, status: ${msg.status}`);
   } catch (err) {
     console.error(`[sms] Failed to text ${expert.name}:`, err.message);
+    if (err.code) console.error(`[sms] Twilio error code: ${err.code}, moreInfo: ${err.moreInfo || 'n/a'}`);
   }
 }
 
