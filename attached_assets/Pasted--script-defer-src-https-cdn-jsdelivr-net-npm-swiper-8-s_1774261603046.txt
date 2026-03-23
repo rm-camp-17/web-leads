@@ -1,0 +1,96 @@
+<script defer src="https://cdn.jsdelivr.net/npm/swiper@8/swiper-bundle.min.js"></script>
+<script defer>
+  var Webflow = Webflow || [];
+  Webflow.push(function () {
+    setTimeout(function(){
+      document.querySelectorAll('[sw-tag-button]').forEach(button => {
+        button.addEventListener('click', () => {
+          const preloader = button.querySelector('.camp-filter-preloader');
+          if (preloader) {
+            preloader.classList.add('is-active');
+          }
+        });
+      });
+    },1000);
+  });
+</script>
+
+<!-- Camp Experts Lead Routing Webhook + Attribution -->
+<script>
+(function() {
+  var BASE_URL = 'https://web-leads.replit.app';
+
+  // Form name → which webhook endpoint to use
+  // Lead forms go to the routing engine, everything else goes to Riley
+  var LEAD_FORMS = [
+    'Initial Request Info Step Form',
+    'Request Info Form',
+    'Camp Experts Test Form'
+  ];
+  var SKIP_FORMS = ['Filter', 'Filters'];
+
+  // 1. Capture & persist UTM params across page navigations
+  var params = new URLSearchParams(window.location.search);
+  var utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+  utmKeys.forEach(function(key) {
+    var val = params.get(key);
+    if (val) sessionStorage.setItem('ce_' + key, val);
+  });
+  if (document.referrer && !sessionStorage.getItem('ce_referrer')) {
+    sessionStorage.setItem('ce_referrer', document.referrer);
+  }
+
+  // 2. Intercept form submissions
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (!form || form.tagName !== 'FORM') return;
+
+    var formName = form.getAttribute('data-name') || form.getAttribute('name') || '';
+
+    // Skip non-submission forms (filters, etc.)
+    if (SKIP_FORMS.indexOf(formName) !== -1) return;
+
+    // Collect all form field values
+    var payload = {};
+    var formData = new FormData(form);
+    formData.forEach(function(value, key) {
+      if (value && String(value).trim()) {
+        payload[key] = String(value).trim();
+      }
+    });
+
+    // Skip if no email (not a real submission)
+    if (!payload.email && !payload.Email && !payload['Email 2']) return;
+
+    // Add attribution data
+    payload.source_url = window.location.href;
+    utmKeys.forEach(function(key) {
+      var val = sessionStorage.getItem('ce_' + key);
+      if (val) payload[key] = val;
+    });
+    var ref = sessionStorage.getItem('ce_referrer');
+    if (ref) payload.referrer = ref;
+    if (formName) payload._formName = formName;
+
+    // Route to the right endpoint based on form name
+    var endpoint = LEAD_FORMS.indexOf(formName) !== -1
+      ? BASE_URL + '/api/webhook/webflow-lead'
+      : BASE_URL + '/api/webhook/webflow-internal';
+
+    // Fire webhook (non-blocking)
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(
+        endpoint,
+        new Blob([JSON.stringify(payload)], { type: 'application/json' })
+      );
+    } else {
+      fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(function() {});
+    }
+  }, true);
+})();
+</script>

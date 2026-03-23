@@ -1,4 +1,5 @@
 const express = require('express');
+const cors = require('cors');
 const { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource, normalizeCountry } = require('./field-normalizer');
 
 function isDomesticCountry(c) {
@@ -12,6 +13,7 @@ const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 app.get('/', (_req, res) => {
