@@ -6,7 +6,7 @@ A Node.js/Express backend service that routes leads from Webflow form submission
 ## Architecture
 - **Runtime**: Node.js 20, Express.js
 - **Database**: Replit PostgreSQL (via `pg` package, `DATABASE_URL`)
-- **Integrations**: HubSpot (CRM), Resend (email), Twilio (SMS) — all via Replit Connectors (`@replit/connectors-sdk`)
+- **Integrations**: HubSpot (CRM), Resend (email), Quo/OpenPhone (SMS) — via Replit Connectors + direct API
 - **Optional**: Anthropic SDK for AI-personalized lead summaries and AI routing fallback
 
 ## Project Structure
@@ -19,7 +19,7 @@ A Node.js/Express backend service that routes leads from Webflow form submission
 | `hubspot.js` | HubSpot CRM API wrapper (Households, Contacts, Children, Deals, 6 association types) |
 | `db.js` | PostgreSQL database layer (pending leads, assignment log with lead source, Manhattan rotation) |
 | `notifications.js` | Email notifications via Resend (expert, family, timeout, internal form forwarding) |
-| `sms.js` | SMS alerts via Twilio |
+| `sms.js` | SMS alerts via Quo (OpenPhone API) |
 
 ## Key Endpoints
 - `GET /` — Health check
@@ -42,4 +42,7 @@ A Node.js/Express backend service that routes leads from Webflow form submission
 ## Environment
 - Server runs on port 5000 (0.0.0.0)
 - Database auto-initializes on startup with column migrations
-- Integrations authenticate via Replit Connectors (no manual API keys needed for HubSpot, Resend, Twilio)
+- Integrations authenticate via Replit Connectors (HubSpot, Resend) and env vars (QUO_API_KEY, QUO_FROM_NUMBER for SMS)
+- Email sends from `connections.campexpert.com` (verified Resend domain), with reply-to set to expert's `@campexperts.com` address
+- Family-facing emails CC the assigned expert
+- TEST_MODE env var removed — routing uses real geographic/CRM rules
