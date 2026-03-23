@@ -12,6 +12,24 @@ const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp, s
 const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
 
+const processingLocks = new Map();
+
+async function withEmailLock(email, fn) {
+  const key = email.toLowerCase();
+  while (processingLocks.has(key)) {
+    await processingLocks.get(key);
+  }
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  processingLocks.set(key, promise);
+  try {
+    return await fn();
+  } finally {
+    processingLocks.delete(key);
+    resolve();
+  }
+}
+
 const app = express();
 app.use(cors({
   origin: [
@@ -43,11 +61,13 @@ app.post('/api/webhook/webflow-lead', async (req, res) => {
       return res.status(400).json({ error: 'Missing email' });
     }
 
-    if (isDetailedForm(normalized)) {
-      await handleDetailedForm(normalized, formData);
-    } else {
-      await handleShortForm(normalized, formData);
-    }
+    await withEmailLock(email, async () => {
+      if (isDetailedForm(normalized)) {
+        await handleDetailedForm(normalized, formData);
+      } else {
+        await handleShortForm(normalized, formData);
+      }
+    });
 
     res.json({ success: true });
   } catch (err) {
