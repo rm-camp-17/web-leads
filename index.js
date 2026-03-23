@@ -201,6 +201,12 @@ async function handleDetailedForm(normalized, rawPayload) {
   const email = normalized.email.toLowerCase();
   console.log(`[detailed-form] Processing for ${email}`);
 
+  const isDupe = await sb.isDuplicateDetailedForm(email);
+  if (isDupe) {
+    console.log(`[detailed-form] Duplicate within 6min for ${email}, skipping`);
+    return;
+  }
+
   const pendingLead = await sb.findPendingLeadByEmail(email);
 
   let contact = await hubspot.searchContactByEmail(email);

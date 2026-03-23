@@ -120,6 +120,17 @@ async function isDuplicateShortForm(email) {
   return rows.length > 0;
 }
 
+async function isDuplicateDetailedForm(email) {
+  const sixMinutesAgo = new Date(Date.now() - 6 * 60_000).toISOString();
+  const { rows } = await pool.query(
+    `SELECT id FROM assignment_log
+     WHERE contact_email = $1 AND created_at >= $2
+     LIMIT 1`,
+    [email.toLowerCase(), sixMinutesAgo]
+  );
+  return rows.length > 0;
+}
+
 async function deletePendingLead(id) {
   await pool.query('DELETE FROM pending_leads WHERE id = $1', [id]);
 }
@@ -207,6 +218,7 @@ module.exports = {
   insertPendingLead,
   findPendingLeadByEmail,
   isDuplicateShortForm,
+  isDuplicateDetailedForm,
   deletePendingLead,
   markPendingLeadProcessed,
   logAssignment,
