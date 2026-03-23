@@ -347,6 +347,7 @@ async function handleDetailedForm(normalized, rawPayload) {
         dealName,
         householdId: householdRecordId || null,
         childId: created.id,
+        year,
       });
       console.log(`[detailed-form] Created deal ${deal.id} for ${dealName}`);
 

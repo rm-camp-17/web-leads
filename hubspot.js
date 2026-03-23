@@ -184,13 +184,14 @@ async function associateDealWithContact(dealId, contactId) {
   await associateObjects('deals', dealId, 'contacts', contactId, 3, 'HUBSPOT_DEFINED');
 }
 
-async function createDeal({ contactId, ownerId, dealName, householdId, childId }) {
+async function createDeal({ contactId, ownerId, dealName, householdId, childId, year }) {
   const properties = {
     dealname: dealName,
     dealstage: 'appointmentscheduled',
     hubspot_owner_id: ownerId,
     pipeline: 'default',
   };
+  if (year) properties.year1 = year;
   if (householdId) properties.associated_household_id = householdId;
   if (childId) properties.associated_child_id = childId;
 
