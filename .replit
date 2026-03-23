@@ -44,3 +44,6 @@ run = ["node", "index.js"]
 
 [userenv.shared]
 QUO_FROM_NUMBER = "PN2eZmOK3I"
+
+[userenv.production]
+TEST_MODE = "true"
