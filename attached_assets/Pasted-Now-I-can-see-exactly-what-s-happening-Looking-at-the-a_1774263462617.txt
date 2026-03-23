@@ -1,0 +1,27 @@
+Now I can see exactly what's happening. Looking at the actual HTML source and the full codebase, my diagnosis from the first message was close but I can refine it after reading the real code.
+The actual root cause is simpler than I initially thought. Your capture-phase submit listener (true as the third arg) IS firing. The Pardot script in the same page proves this — it hooks into the same submit event and works fine. The problem is isolated to the sendBeacon call silently failing cross-origin with application/json.
+Let me also flag something I spotted: the Pardot submission code is still live in the page (submitting to go.pardot.com). Your system docs say Pardot was removed, but it's actively running in the inline <script> block. That's a separate issue but worth noting.
+Here's the fix — it's actually minimal. Two changes:Architected server-side patch implementation for index.jsArchitected server-side patch implementation for index.jsNow the server-side changes — this is a targeted patch to index.js, not a full rewrite:Prepared to implement code modifications for deploymentPrepared to implement code modifications for deploymentLet me also produce the patched index.js directly so you can just drop it in:Prepared to articulate codebase modificationsPrepared to articulate codebase modificationsHere's what changed and why, refined after reading the actual source code:
+Revised diagnosis: Your capture-phase submit listener (true third arg) IS firing. The Pardot inline script in the same page proves this — it hooks into the same submit event successfully. The sole reason zero requests reach your server is that sendBeacon with a Blob({ type: 'application/json' }) silently fails cross-origin. application/json triggers a CORS preflight, and sendBeacon can't handle preflights properly (it sends with credentials: 'include' which is incompatible with your server's Access-Control-Allow-Origin: *).
+What changed in the footer code (replace the entire <!-- Camp Experts Lead Routing --> block):
+
+Primary send method is now fetch() with keepalive: true and proper Content-Type: application/json. This works because fetch handles CORS preflights correctly.
+Fallback is sendBeacon with a plain string (no Blob). When you pass a string directly to sendBeacon, the browser sends it as text/plain;charset=UTF-8, which is CORS-safelisted. No preflight, no failure.
+Added MutationObserver on .w-form-done as a backup mechanism. If the submit event ever gets swallowed (future library changes, etc.), this catches successful submissions by watching Webflow toggle the success div.
+Dedup logic prevents double-sends when both the submit listener and MutationObserver fire for the same submission.
+
+What changed in index.js (three targeted patches):
+
+CORS config now allows campexperts.com explicitly with credentials: true instead of wildcard *.
+Added express.text({ type: 'text/plain' }) middleware so the sendBeacon fallback path works.
+Both webhook handlers now check if req.body is a string and parse it as JSON if so.
+
+Deployment order: Deploy index.js to Replit first (server needs to accept the new content types before the client starts sending them), then update the Webflow footer code.
+Validation test (run in devtools on campexperts.com after deploying the server):
+jsfetch('https://web-leads.replit.app/api/webhook/webflow-lead', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  mode: 'cors',
+  body: JSON.stringify({ email: 'test@test.com', _formName: 'Camp Experts Test Form' })
+}).then(r => r.json()).then(console.log).catch(console.error)
+Bonus flag: The Pardot submission code is still running in the page's inline script block (submitting to go.pardot.com/l/1077882/... via hidden iframes). Your system docs say Pardot was replaced with HubSpot tracking. That dead code should be cleaned up separately.

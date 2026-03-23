@@ -13,8 +13,16 @@ const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://www.campexperts.com',
+    'https://campexperts.com',
+    'https://campexperts.webflow.io',
+  ],
+  credentials: true,
+}));
 app.use(express.json());
+app.use(express.text({ type: 'text/plain' }));
 
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'Camp Experts Lead Routing Engine' });
@@ -22,7 +30,7 @@ app.get('/', (_req, res) => {
 
 app.post('/api/webhook/webflow-lead', async (req, res) => {
   try {
-    const rawPayload = req.body;
+    const rawPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     console.log('[webhook] Received payload:', JSON.stringify(rawPayload));
 
     const formData = rawPayload.data || rawPayload;
@@ -57,7 +65,7 @@ const INTERNAL_FORM_NAMES = [
 
 app.post('/api/webhook/webflow-internal', async (req, res) => {
   try {
-    const payload = req.body;
+    const payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const formName = payload._formName || payload.formName || payload['Form Name'] || 'Unknown Form';
     console.log(`[internal] Received "${formName}" submission`);
 
