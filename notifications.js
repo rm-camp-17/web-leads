@@ -385,9 +385,61 @@ ${payload.source_url ? `<p style="color:#666;font-size:12px;margin-top:16px;">Su
   }
 }
 
+async function sendReneeFollowUpReminder({ familyName, familyEmail, familyPhone, children }) {
+  const childSummary = children.map(c => `${c.first_name} ${c.last_name}`).join(', ') || 'N/A';
+
+  const html = `
+<div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#333;">
+  <p>Hi Riley,</p>
+
+  <p>This is a reminder to check whether Renee has reached out to the <strong>${esc(familyName)}</strong> family yet.</p>
+
+  <p><strong>Details:</strong></p>
+  <ul>
+    <li>Family: ${esc(familyName)}</li>
+    <li>Email: ${esc(familyEmail)}</li>
+    <li>Phone: ${esc(familyPhone || 'N/A')}</li>
+    <li>Children: ${esc(childSummary)}</li>
+  </ul>
+
+  <p>This lead was assigned to Renee 6 hours ago. Please confirm she's made contact.</p>
+
+  <p>— Camp Experts Lead System</p>
+</div>
+`;
+
+  const text = `Hi Riley,
+
+This is a reminder to check whether Renee has reached out to the ${familyName} family yet.
+
+Family: ${familyName}
+Email: ${familyEmail}
+Phone: ${familyPhone || 'N/A'}
+Children: ${childSummary}
+
+This lead was assigned to Renee 6 hours ago. Please confirm she's made contact.
+
+— Camp Experts Lead System`;
+
+  try {
+    const resend = await getResendClient();
+    await resend.emails.send({
+      from: 'Camp Experts System <hey@connections.campexpert.com>',
+      to: 'riley@campexperts.com',
+      subject: `Follow-up check: Did Renee reach out to ${familyName}?`,
+      text,
+      html,
+    });
+    console.log(`[renee-followup] Reminder sent to riley@campexperts.com for ${familyName}`);
+  } catch (err) {
+    console.error(`[renee-followup] Failed to send reminder for ${familyName}:`, err.message);
+  }
+}
+
 module.exports = {
   sendExpertNotification,
   sendFamilyAcknowledgment,
   sendTimeoutFollowUp,
   sendInternalFormNotification,
+  sendReneeFollowUpReminder,
 };

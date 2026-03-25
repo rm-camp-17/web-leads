@@ -8,7 +8,7 @@ function isDomesticCountry(c) {
 const hubspot = require('./hubspot');
 const sb = require('./db');
 const { routeLead } = require('./routing-engine');
-const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp, sendInternalFormNotification } = require('./notifications');
+const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp, sendInternalFormNotification, sendReneeFollowUpReminder } = require('./notifications');
 const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
 
@@ -360,7 +360,10 @@ async function handleDetailedForm(normalized, rawPayload) {
 
   const childDealResults = await Promise.all(childDealPromises);
 
-  await Promise.all([
+  const RENEE_ID = '87283318';
+  const isRenee = routingResult.expertId === RENEE_ID;
+
+  const notificationPromises = [
     sendExpertNotification({
       expertOwnerId: routingResult.expertId,
       lead: normalized,
@@ -382,13 +385,6 @@ async function handleDetailedForm(normalized, rawPayload) {
       description: normalized.description,
     }),
 
-    sendFamilyAcknowledgment({
-      email,
-      firstName: normalized.first_name,
-      expertName: expert?.name || 'Camp Experts',
-      expertEmail: expert?.email,
-    }),
-
     sb.logAssignment({
       contactId,
       contactEmail: email,
@@ -408,7 +404,31 @@ async function handleDetailedForm(normalized, rawPayload) {
       ? sb.deletePendingLead(pendingLead.id).then(() =>
           console.log(`[detailed-form] Deleted pending lead ${pendingLead.id}`))
       : Promise.resolve(),
-  ]);
+  ];
+
+  if (!isRenee) {
+    notificationPromises.push(
+      sendFamilyAcknowledgment({
+        email,
+        firstName: normalized.first_name,
+        expertName: expert?.name || 'Camp Experts',
+        expertEmail: expert?.email,
+      })
+    );
+  } else {
+    console.log(`[detailed-form] Renee lead — skipping family acknowledgment email`);
+    setTimeout(() => {
+      sendReneeFollowUpReminder({
+        familyName,
+        familyEmail: email,
+        familyPhone: normalized.phone,
+        children,
+      });
+    }, 6 * 60 * 60 * 1000);
+    console.log(`[detailed-form] Scheduled 6-hour follow-up reminder for Riley re: ${familyName}`);
+  }
+
+  await Promise.all(notificationPromises);
 
   console.log(`[detailed-form] Complete: ${familyName} → ${expert?.name || routingResult.expertId}`);
 }
