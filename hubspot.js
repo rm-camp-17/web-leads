@@ -131,7 +131,7 @@ async function createChild({ firstName, lastName, birthDate, gender, interestedY
   const childId = `CH_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const properties = {
     child_id: childId,
-    first_name: firstName || '',
+    child_first_name: firstName || '',
     last_name: lastName || '',
   };
   if (birthDate) properties.dob = birthDate;
