@@ -1,4 +1,7 @@
 const { EXPERTS } = require('./routing-config');
+function safeLogError(params) {
+  try { require('./db').logError(params); } catch {}
+}
 
 const QUO_API_URL = 'https://api.openphone.com/v1/messages';
 const QUO_API_KEY = process.env.QUO_API_KEY;
@@ -92,12 +95,14 @@ async function sendExpertSms({ expertOwnerId, familyName, phone, city, zip, coun
     if (!res.ok) {
       const errorBody = await res.text();
       console.error(`[sms] Quo API returned ${res.status}: ${errorBody}`);
+      safeLogError({ source: 'sms', errorMessage: `Quo API ${res.status}: ${errorBody}`, context: { expertName: expert.name, familyName } });
       return;
     }
 
     console.log(`[sms] Text sent to ${expert.name} (${expert.phone}) via Quo`);
   } catch (err) {
     console.error(`[sms] Failed to text ${expert.name}:`, err.message);
+    safeLogError({ source: 'sms', errorMessage: err.message, context: { expertName: expert.name, familyName } });
   }
 }
 

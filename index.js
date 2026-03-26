@@ -11,6 +11,7 @@ const { routeLead } = require('./routing-engine');
 const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp, sendInternalFormNotification, sendReneeFollowUpReminder } = require('./notifications');
 const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
+const { startErrorMonitoring } = require('./error-monitor');
 
 const processingLocks = new Map();
 
@@ -72,6 +73,8 @@ app.post('/api/webhook/webflow-lead', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[webhook] Error:', err.message, err.stack);
+    const email = (req.body?.email || req.body?.data?.email || '').toLowerCase();
+    sb.logError({ source: 'webhook', errorMessage: err.message, context: { email, stack: err.stack?.slice(0, 500) } });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -94,6 +97,8 @@ app.post('/api/webhook/webflow-internal', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[internal] Error:', err.message, err.stack);
+    const rawBody = typeof req.body === 'object' ? req.body : {};
+    sb.logError({ source: 'internal-form', errorMessage: err.message, context: { formName: rawBody?.formName || rawBody?._formName || 'unknown' } });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -206,6 +211,7 @@ async function handleShortForm(normalized, rawPayload) {
     console.log(`[short-form] Associated Contact ${contactId} ↔ Household ${householdRecordId}`);
   } catch (err) {
     console.error(`[short-form] Error creating household:`, err.message);
+    sb.logError({ source: 'short-form-household', errorMessage: err.message, context: { email, familyName } });
   }
 
   const pendingPayload = {
@@ -290,6 +296,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       console.log(`[detailed-form] Updated Household ${householdRecordId}`);
     } catch (err) {
       console.error(`[detailed-form] Error updating household:`, err.message);
+      sb.logError({ source: 'detailed-form-household', errorMessage: err.message, context: { email, familyName } });
     }
   } else {
     try {
@@ -322,6 +329,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       await hubspot.associateContactWithHousehold(contactId, householdRecordId);
     } catch (err) {
       console.error(`[detailed-form] Error creating household:`, err.message);
+      sb.logError({ source: 'detailed-form-household', errorMessage: err.message, context: { email, familyName } });
     }
   }
 
@@ -374,6 +382,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       return { childId: created.id, dealId: deal.id };
     } catch (err) {
       console.error(`[detailed-form] Error creating child/deal for ${child.first_name}:`, err.message);
+      sb.logError({ source: 'detailed-form-child-deal', errorMessage: err.message, context: { email, childName: `${child.first_name} ${child.last_name}` } });
       return null;
     }
   });
@@ -522,6 +531,7 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
     console.log(`[timeout] Scheduled follow-up email to ${email} in 6 minutes`);
   } catch (err) {
     console.error(`[timeout] Error handling timeout for ${email}:`, err.message);
+    sb.logError({ source: 'timeout', errorMessage: err.message, context: { email } });
   }
 }
 
@@ -555,10 +565,12 @@ setInterval(async () => {
         console.log(`[cleanup] Processed expired lead ${lead.email}`);
       } catch (err) {
         console.error(`[cleanup] Error processing expired lead ${lead.email}:`, err.message);
+        sb.logError({ source: 'cleanup', errorMessage: err.message, context: { email: lead.email } });
       }
     }
   } catch (err) {
     console.error('[cleanup] Error checking expired leads:', err.message);
+    sb.logError({ source: 'cleanup', errorMessage: err.message, context: { operation: 'expired-leads-check' } });
   }
 }, 5 * 60 * 1000);
 
@@ -566,6 +578,7 @@ const PORT = process.env.PORT || 5000;
 
 async function start() {
   await sb.initDatabase();
+  startErrorMonitoring();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Camp Experts Lead Routing Engine running on port ${PORT}`);
   });

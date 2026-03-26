@@ -1,6 +1,9 @@
 const { Resend } = require('resend');
 const Anthropic = require('@anthropic-ai/sdk');
 const { EXPERTS } = require('./routing-config');
+function safeLogError(params) {
+  try { require('./db').logError(params); } catch {}
+}
 
 async function getResendCredentials() {
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
@@ -217,6 +220,7 @@ ${children.map((child, i) => {
     console.log(`Notification sent to ${expert.name} (${expert.email})`);
   } catch (err) {
     console.error(`Failed to send notification to ${expert.email}:`, err.message);
+    safeLogError({ source: 'email-expert-notification', errorMessage: err.message, context: { expertEmail: expert.email, familyName } });
   }
 }
 
@@ -265,6 +269,7 @@ The Camp Experts Team`;
     console.log(`Family acknowledgment sent to ${email} (cc: ${expertEmail || 'none'})`);
   } catch (err) {
     console.error(`Failed to send family acknowledgment to ${email}:`, err.message);
+    safeLogError({ source: 'email-family-acknowledgment', errorMessage: err.message, context: { email } });
   }
 }
 
@@ -313,6 +318,7 @@ The Camp Experts Team`;
     console.log(`Timeout follow-up sent to ${email} (cc: ${expertEmail || 'none'})`);
   } catch (err) {
     console.error(`Failed to send timeout follow-up to ${email}:`, err.message);
+    safeLogError({ source: 'email-timeout-followup', errorMessage: err.message, context: { email } });
   }
 }
 
@@ -382,6 +388,7 @@ ${payload.source_url ? `<p style="color:#666;font-size:12px;margin-top:16px;">Su
     console.log(`[internal-form] "${formName}" forwarded to ${RILEY_EMAIL}`);
   } catch (err) {
     console.error(`[internal-form] Failed to send "${formName}" to ${RILEY_EMAIL}:`, err.message);
+    safeLogError({ source: 'email-internal-form', errorMessage: err.message, context: { formName } });
   }
 }
 
@@ -433,6 +440,7 @@ This lead was assigned to Renee 6 hours ago. Please confirm she's made contact.
     console.log(`[renee-followup] Reminder sent to riley@campexperts.com for ${familyName}`);
   } catch (err) {
     console.error(`[renee-followup] Failed to send reminder for ${familyName}:`, err.message);
+    safeLogError({ source: 'email-renee-followup', errorMessage: err.message, context: { familyName } });
   }
 }
 
@@ -442,4 +450,5 @@ module.exports = {
   sendTimeoutFollowUp,
   sendInternalFormNotification,
   sendReneeFollowUpReminder,
+  getResendClient,
 };
