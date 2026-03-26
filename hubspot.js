@@ -1,5 +1,8 @@
 const { ReplitConnectors } = require('@replit/connectors-sdk');
 const { HUBSPOT_CHILD_OBJECT_ID, HUBSPOT_HOUSEHOLD_OBJECT_ID } = require('./routing-config');
+function safeLogError(params) {
+  try { require('./db').logError(params); } catch {}
+}
 
 const connectors = new ReplitConnectors();
 
@@ -93,6 +96,7 @@ async function searchHouseholdByEmail(email) {
     return data.results && data.results.length > 0 ? data.results[0] : null;
   } catch (err) {
     console.error('[hubspot] Household search by email failed:', err.message);
+    safeLogError({ source: 'hubspot-search-household', errorMessage: err.message, context: { email } });
     return null;
   }
 }
@@ -234,7 +238,8 @@ async function getContactHouseholds(contactId) {
       { method: 'GET' }
     );
     return data.results || [];
-  } catch {
+  } catch (err) {
+    safeLogError({ source: 'hubspot-get-contact-households', errorMessage: err.message, context: { contactId } });
     return [];
   }
 }
@@ -246,7 +251,8 @@ async function getHouseholdContacts(householdId) {
       { method: 'GET' }
     );
     return data.results || [];
-  } catch {
+  } catch (err) {
+    safeLogError({ source: 'hubspot-get-household-contacts', errorMessage: err.message, context: { householdId } });
     return [];
   }
 }

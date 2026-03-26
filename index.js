@@ -514,7 +514,7 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
     if (householdRecordId) {
       promises.push(
         hubspot.updateHousehold(householdRecordId, { hubspot_owner_id: CAMP_EXPERTS_OFFICE_ID })
-          .catch(err => console.error(`[timeout] Failed to update household owner:`, err.message))
+          .catch(err => { console.error(`[timeout] Failed to update household owner:`, err.message); sb.logError({ source: 'timeout-household-update', errorMessage: err.message, context: { email } }); })
       );
     }
 
@@ -526,7 +526,7 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
       sendTimeoutFollowUp({
         email,
         firstName: normalized.first_name,
-      }).catch(err => console.error(`[timeout-followup] Error for ${email}:`, err.message));
+      }).catch(err => { console.error(`[timeout-followup] Error for ${email}:`, err.message); sb.logError({ source: 'timeout-followup-email', errorMessage: err.message, context: { email } }); });
     }, 6 * 60 * 1000);
     console.log(`[timeout] Scheduled follow-up email to ${email} in 6 minutes`);
   } catch (err) {
@@ -560,7 +560,7 @@ setInterval(async () => {
         const leadFirstName = lead.raw_payload?.first_name || lead.raw_payload?.First_Name;
         setTimeout(() => {
           sendTimeoutFollowUp({ email: leadEmail, firstName: leadFirstName })
-            .catch(err => console.error(`[cleanup-followup] Error for ${leadEmail}:`, err.message));
+            .catch(err => { console.error(`[cleanup-followup] Error for ${leadEmail}:`, err.message); sb.logError({ source: 'cleanup-followup-email', errorMessage: err.message, context: { email: leadEmail } }); });
         }, 6 * 60 * 1000);
         console.log(`[cleanup] Processed expired lead ${lead.email}`);
       } catch (err) {
