@@ -158,15 +158,25 @@ async function handleShortForm(normalized, rawPayload) {
 
   let contactId;
   if (!contact) {
-    const created = await hubspot.createContact({
-      firstName: normalized.first_name,
-      lastName: normalized.last_name,
-      email,
-      phone: normalized.phone,
-      ownerId: CAMP_EXPERTS_OFFICE_ID,
-    });
-    contactId = created.id;
-    console.log(`[short-form] Created HubSpot contact ${contactId}`);
+    try {
+      const created = await hubspot.createContact({
+        firstName: normalized.first_name,
+        lastName: normalized.last_name,
+        email,
+        phone: normalized.phone,
+        ownerId: CAMP_EXPERTS_OFFICE_ID,
+      });
+      contactId = created.id;
+      console.log(`[short-form] Created HubSpot contact ${contactId}`);
+    } catch (err) {
+      const existingIdMatch = err.message.match(/Existing ID:\s*(\d+)/);
+      if (existingIdMatch) {
+        contactId = existingIdMatch[1];
+        console.log(`[short-form] Contact already exists ${contactId}, using existing`);
+      } else {
+        throw err;
+      }
+    }
   } else {
     contactId = contact.id;
     console.log(`[short-form] Found existing HubSpot contact ${contactId}`);
@@ -233,14 +243,24 @@ async function handleDetailedForm(normalized, rawPayload) {
   let contactId;
 
   if (!contact) {
-    const created = await hubspot.createContact({
-      firstName: normalized.first_name,
-      lastName: normalized.last_name,
-      email,
-      phone: normalized.phone,
-    });
-    contactId = created.id;
-    console.log(`[detailed-form] Created HubSpot contact ${contactId}`);
+    try {
+      const created = await hubspot.createContact({
+        firstName: normalized.first_name,
+        lastName: normalized.last_name,
+        email,
+        phone: normalized.phone,
+      });
+      contactId = created.id;
+      console.log(`[detailed-form] Created HubSpot contact ${contactId}`);
+    } catch (err) {
+      const existingIdMatch = err.message.match(/Existing ID:\s*(\d+)/);
+      if (existingIdMatch) {
+        contactId = existingIdMatch[1];
+        console.log(`[detailed-form] Contact already exists ${contactId}, using existing`);
+      } else {
+        throw err;
+      }
+    }
   } else {
     contactId = contact.id;
     console.log(`[detailed-form] Found existing HubSpot contact ${contactId}`);

@@ -129,8 +129,10 @@ async function updateHousehold(householdRecordId, properties) {
 
 async function createChild({ firstName, lastName, birthDate, gender, interestedYear, budget, sessionLength, age, ownerId }) {
   const childId = `CH_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || '';
   const properties = {
     child_id: childId,
+    first_name: fullName,
     child_first_name: firstName || '',
     last_name: lastName || '',
   };
