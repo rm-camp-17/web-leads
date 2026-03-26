@@ -2,7 +2,7 @@ const { Resend } = require('resend');
 const Anthropic = require('@anthropic-ai/sdk');
 const { EXPERTS } = require('./routing-config');
 function safeLogError(params) {
-  try { require('./db').logError(params); } catch {}
+  try { require('./db').logError(params); } catch (e) { console.error('[safeLogError] Failed to log error:', e.message); }
 }
 
 async function getResendCredentials() {

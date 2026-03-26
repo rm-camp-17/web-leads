@@ -1,7 +1,7 @@
 const { ReplitConnectors } = require('@replit/connectors-sdk');
 const { HUBSPOT_CHILD_OBJECT_ID, HUBSPOT_HOUSEHOLD_OBJECT_ID } = require('./routing-config');
 function safeLogError(params) {
-  try { require('./db').logError(params); } catch {}
+  try { require('./db').logError(params); } catch (e) { console.error('[safeLogError] Failed to log error:', e.message); }
 }
 
 const connectors = new ReplitConnectors();
