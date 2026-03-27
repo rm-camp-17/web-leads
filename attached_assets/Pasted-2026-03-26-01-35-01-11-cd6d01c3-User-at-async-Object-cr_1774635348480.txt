@@ -1,0 +1,119 @@
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at async Object.createContact (/home/runner/workspace/hubspot.js:61:16)
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2026-03-26 01:37:06.93
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Adriana: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c4c602-0000-0000-5f78-937cfbcb4e94","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+at async withEmailLock (/home/runner/workspace/index.js:26:12)
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+at hubspotFetch (/home/runner/workspace/hubspot.js:19:11)
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+at async handleShortForm (/home/runner/workspace/index.js:161:21)
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:64:5
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:68:9
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+at async Object.createContact (/home/runner/workspace/hubspot.js:61:16)
+2026-03-26 10:11:30.43
+cd6d01c3
+User
+[webhook] Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211760582481","correlationId":"69c53e91-0000-0000-3ac2-c248e66ee3a9","category":"CONFLICT"} Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211760582481","correlationId":"69c53e91-0000-0000-3ac2-c248e66ee3a9","category":"CONFLICT"}
+2026-03-26 10:15:01.87
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Bella: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c53f65-0000-0000-434e-62f27743982b","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 10:15:02.41
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Sherry: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c53f65-0000-0000-38ca-9ceeafbf9df9","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 10:15:02.70
+cd6d01c3
+User
+[sms] Quo API returned 403: {"message":"Unable to send international messages. International messaging needs to be enabled in phone number settings","code":"0203403","status":403,"docs":"https://quo.com/docs","title":"International Messaging Not Allowed","trace":"6733690827913038204"}
+2026-03-26 13:57:34.09
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Keila: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c5738d-0000-0000-4afd-62d3d53b7d47","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 17:19:23.63
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Ksenia: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c5a2db-0000-0000-2c4c-6395cf0c3197","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 19:07:19.32
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Carlos Henrique: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c5bc26-0000-0000-7927-17cfa3fa80d5","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 20:35:51.73
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Ariel: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c5d0e7-0000-0000-4dd1-567b0fc94d1a","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:68:9
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+at async handleShortForm (/home/runner/workspace/index.js:161:21)
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+at async withEmailLock (/home/runner/workspace/index.js:26:12)
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+at async Object.createContact (/home/runner/workspace/hubspot.js:61:16)
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+at hubspotFetch (/home/runner/workspace/hubspot.js:19:11)
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+[webhook] Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211890623144","correlationId":"69c5e5b0-0000-0000-02bd-4c0ee5a2b387","category":"CONFLICT"} Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211890623144","correlationId":"69c5e5b0-0000-0000-02bd-4c0ee5a2b387","category":"CONFLICT"}
+2026-03-26 22:04:33.33
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:64:5
+2026-03-27 07:55:41.63
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Noa: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c6703d-0000-0000-570d-1597ddfd2c6a","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-27 07:55:41.93
+cd6d01c3
+User
+[sms] Quo API returned 403: {"message":"Unable to send international messages. International messaging needs to be enabled in phone number settings","code":"0203403","status":403,"docs":"https://quo.com/docs","title":"International Messaging Not Allowed","trace":"4015131023667528564"}
+Wrap
+Colors
+
+
+
+
+
