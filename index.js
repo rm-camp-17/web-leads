@@ -229,8 +229,8 @@ async function handleShortForm(normalized, rawPayload) {
   console.log(`[short-form] Inserted pending lead ${pendingLead.id}`);
 
   const pendingId = pendingLead.id;
-  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 4 * 60 * 1000);
-  console.log(`[short-form] Started 4-minute timeout for ${email}`);
+  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 12 * 60 * 1000);
+  console.log(`[short-form] Started 12-minute timeout for ${email}`);
 }
 
 async function handleDetailedForm(normalized, rawPayload) {
@@ -522,13 +522,11 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
 
     console.log(`[timeout] Assigned ${email} to Camp Experts Office (timeout)`);
 
-    setTimeout(() => {
-      sendTimeoutFollowUp({
-        email,
-        firstName: normalized.first_name,
-      }).catch(err => { console.error(`[timeout-followup] Error for ${email}:`, err.message); sb.logError({ source: 'timeout-followup-email', errorMessage: err.message, context: { email } }); });
-    }, 6 * 60 * 1000);
-    console.log(`[timeout] Scheduled follow-up email to ${email} in 6 minutes`);
+    sendTimeoutFollowUp({
+      email,
+      firstName: normalized.first_name,
+    }).catch(err => { console.error(`[timeout-followup] Error for ${email}:`, err.message); sb.logError({ source: 'timeout-followup-email', errorMessage: err.message, context: { email } }); });
+    console.log(`[timeout] Sent follow-up email to ${email}`);
   } catch (err) {
     console.error(`[timeout] Error handling timeout for ${email}:`, err.message);
     sb.logError({ source: 'timeout', errorMessage: err.message, context: { email } });
@@ -537,7 +535,7 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
 
 setInterval(async () => {
   try {
-    const expired = await sb.getExpiredPendingLeads(4);
+    const expired = await sb.getExpiredPendingLeads(12);
     for (const lead of expired) {
       console.log(`[cleanup] Found expired pending lead: ${lead.email}`);
       try {
@@ -558,10 +556,8 @@ setInterval(async () => {
         await sb.deletePendingLead(lead.id);
         const leadEmail = lead.email;
         const leadFirstName = lead.raw_payload?.first_name || lead.raw_payload?.First_Name;
-        setTimeout(() => {
-          sendTimeoutFollowUp({ email: leadEmail, firstName: leadFirstName })
-            .catch(err => { console.error(`[cleanup-followup] Error for ${leadEmail}:`, err.message); sb.logError({ source: 'cleanup-followup-email', errorMessage: err.message, context: { email: leadEmail } }); });
-        }, 6 * 60 * 1000);
+        sendTimeoutFollowUp({ email: leadEmail, firstName: leadFirstName })
+          .catch(err => { console.error(`[cleanup-followup] Error for ${leadEmail}:`, err.message); sb.logError({ source: 'cleanup-followup-email', errorMessage: err.message, context: { email: leadEmail } }); });
         console.log(`[cleanup] Processed expired lead ${lead.email}`);
       } catch (err) {
         console.error(`[cleanup] Error processing expired lead ${lead.email}:`, err.message);

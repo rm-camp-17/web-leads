@@ -198,6 +198,9 @@ const ZIP_ROUTES = {
   '10804': '87283323',
   '10805': '87283323',
 
+  // === BROOKLYN ===
+  '112': '87283301',   // Brooklyn → Laurie Karol
+
   // === LONG ISLAND ===
   '110': '87283301',   // Nassau → Laurie Karol
   '115': '87283301',   // Nassau → Laurie Karol

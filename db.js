@@ -214,7 +214,7 @@ async function getNextManhattanExpert() {
   return newCounter % 3 < 2 ? WENDY_ID : ALLISON_ID;
 }
 
-async function getExpiredPendingLeads(minutesOld = 4) {
+async function getExpiredPendingLeads(minutesOld = 12) {
   const cutoff = new Date(Date.now() - minutesOld * 60_000).toISOString();
   const { rows } = await pool.query(
     `SELECT * FROM pending_leads
