@@ -56,11 +56,29 @@ if (process.env.TEST_MODE === 'true') {
   EXPERTS['86362403'] = { name: 'Riley (Test Mode)', email: 'riley@campexperts.com', phone: '+19124141215' };
 }
 
-// Owner IDs to exclude from "existing family" matching
-const EXCLUDED_OWNER_IDS = ['86337614', '86362403']; // Sam Goldberg / S'More Hires, Camp Experts Office
+// Departed / inactive experts — NEVER route new leads to these seats, and skip
+// them when matching an "existing family" so a returning family routes by
+// geography instead of dead-ending on someone who is no longer here.
+// NOTE: this only changes ROUTING. Existing CRM ownership is left untouched —
+// per Riley, existing families are only re-routed if they resubmit via the website.
+const INACTIVE_OWNER_IDS = [
+  '87283299', // Lara Weinberg — inactive (old territory Bergen/Essex NJ now flows to Dara / Risa via ZIP rules)
+  '87283306', // Lisa Dalinka — inactive ("ignore")
+  '87283294', // Julie Rosenberg — inactive
+  '87283302', // Leslie Zeller — inactive
+  '93194078', // Heather Messer — inactive
+];
 
-// Camp Experts Office fallback
+// Owner IDs to exclude from "existing family" matching:
+// hiring/office buckets + every inactive expert above.
+const EXCLUDED_OWNER_IDS = ['86337614', '86362403', ...INACTIVE_OWNER_IDS]; // Sam Goldberg / S'More Hires, Camp Experts Office, + inactive experts
+
+// Camp Experts Office fallback (international / no-signal only)
 const CAMP_EXPERTS_OFFICE_ID = '86362403';
+
+// Jump-ball owner — domestic leads in low-density / uncovered areas with no
+// clear historical expert (previously these landed on Camp Experts Office).
+const JUMP_BALL_OWNER_ID = '87283303'; // Lindsey Schwimmer
 
 // Manhattan rotation constants
 const WENDY_ID = '87283325';
@@ -408,6 +426,35 @@ const ZIP_ROUTES = {
   '950': '87283281', '951': '87283281', '952': '87283281', '953': '87283281',
   '954': '87283281', '955': '87283281', '956': '87283281', '957': '87283281',
   '958': '87283281', '959': '87283281', '960': '87283281', '961': '87283281',
+
+  // === COVERAGE GAP FILLS (no rule before; assigned to the active expert who
+  //     already has the clear historical book in that US region) ===
+  '100': MANHATTAN_ROTATION, // Manhattan proper (beyond the explicit zip list) → rotation
+  '101': MANHATTAN_ROTATION,
+  '102': MANHATTAN_ROTATION,
+  '107': '87283309', // Yonkers / central Westchester → Michele Gershwin
+  '108': '87283323', // New Rochelle / lower Westchester → Shari Levine
+  '112': '87283301', // Brooklyn → Laurie Karol
+  '113': '87283301', // Queens → Laurie Karol
+  '077': '87283320', // Monmouth / NJ shore → Risa Goldberg
+  '078': '87283320',
+  '079': '87283320',
+  '085': '87283293', // Ocean / South-Central NJ → Jennifer Markizon (nearest active book)
+  '189': '87283293', // Poconos / NE PA → Jennifer Markizon
+
+  // === JUMP BALLS → Lindsey Schwimmer ===
+  // Low-density / orphaned US regions with no clear active expert (these were
+  // mostly sitting on Camp Experts Office, or on a now-inactive expert).
+  // The domestic gap fallback below sends every OTHER unmatched US lead here too.
+  '109': '87283303', // Rockland / Orange County NY (was Lara Weinberg)
+  '020': '87283303', // Eastern MA (Worcester/Framingham)
+  '021': '87283303', // Greater Boston
+  '024': '87283303', // SE Massachusetts
+  '080': '87283303', // South Jersey (Camden)
+  '088': '87283303', // Central NJ (Trenton fringe)
+  '432': '87283303', // Columbus OH
+  '852': '87283303', // Phoenix AZ
+  '130': '87283303', // Syracuse NY
 };
 
 // Phone area code → owner ID (fallback when no zip)
@@ -490,6 +537,49 @@ const AREA_CODE_ROUTES = {
   '442': '87283281',
 };
 
+// International phone country code → owner ID.
+// This is the fix for the "European ZIP collision": a Paris family whose phone
+// is +33… but whose Country field was left blank used to fall through to the
+// US ZIP table, where "75008" looks exactly like Dallas TX ("750"). Matching on
+// the dialing code routes them to the correct international expert FIRST,
+// regardless of (or in the absence of) the Country field.
+// Keys are dialing codes WITHOUT the leading "+"; longest match wins.
+const PHONE_CC_ROUTES = {
+  '33': '87283278',  // France → Catherine Visan
+  '39': '87283300',  // Italy → Laura Toledo
+  '377': '87283300', // Monaco → Laura Toledo
+  '44': '87283277',  // United Kingdom → Carrie Fleming
+  '353': '87283277', // Ireland → Carrie Fleming
+  '972': '87283316', // Israel → Pamela Bank
+  '34': '87283278',  // Spain → Catherine Visan
+  '351': '87283278', // Portugal → Catherine Visan
+  '49': '87283278',  // Germany → Catherine Visan
+  '41': '87283278',  // Switzerland → Catherine Visan
+  '43': '87283278',  // Austria → Catherine Visan
+  '31': '87283278',  // Netherlands → Catherine Visan
+  '32': '87283278',  // Belgium → Catherine Visan
+  '352': '87283278', // Luxembourg → Catherine Visan
+  '46': '87283278',  // Sweden → Catherine Visan
+  '47': '87283278',  // Norway → Catherine Visan
+  '45': '87283278',  // Denmark → Catherine Visan
+  '90': '87283296',  // Turkey → Karen Meister
+  '55': '87283276',  // Brazil → Carolina Lautenberg
+  '54': '87283276',  // Argentina → Carolina Lautenberg
+  '56': '87283276',  // Chile → Carolina Lautenberg
+  '58': '87283276',  // Venezuela → Carolina Lautenberg
+  '51': '87283317',  // Peru → Pilar Vidal
+  '57': '87487512',  // Colombia → Lina & Maria
+  '971': '87283277', // UAE → Carrie Fleming
+  '966': '87283277', // Saudi Arabia → Carrie Fleming
+  '965': '87283277', // Kuwait → Carrie Fleming
+  '974': '87283277', // Qatar → Carrie Fleming
+  '973': '87283277', // Bahrain → Carrie Fleming
+  '961': '87283277', // Lebanon → Carrie Fleming
+  '962': '87283277', // Jordan → Carrie Fleming
+  '968': '87283277', // Oman → Carrie Fleming
+  '20': '87283277',  // Egypt → Carrie Fleming
+};
+
 // HubSpot custom object IDs
 const HUBSPOT_CHILD_OBJECT_ID = '2-50911061';
 const HUBSPOT_HOUSEHOLD_OBJECT_ID = '2-53610744';
@@ -533,15 +623,17 @@ const EXPERT_PROFILES = {
   '87283273': { regions: ['Ohio', 'Michigan', 'Wisconsin', 'Minnesota'], specialty: 'Upper Midwest' },
   '87283289': { regions: ['Suffolk County', 'Long Island'], specialty: 'Suffolk County, Eastern Long Island' },
   '87283281': { regions: ['California', 'Los Angeles', 'San Francisco', 'Bay Area'], specialty: 'All of California' },
-  '87283303': { regions: ['Cooper City FL', 'Pembroke Pines', 'Southwest Broward'], specialty: 'Southwest Broward County' },
+  '87283303': { regions: ['Cooper City FL', 'Pembroke Pines', 'Southwest Broward', 'National gap coverage'], specialty: 'Southwest Broward County; jump-ball / national gap coverage for low-density & uncovered US areas' },
   '87283268': { regions: ['Chicago city'], specialty: 'City of Chicago proper' },
   '87283310': { regions: ['Livingston NJ'], specialty: 'Livingston NJ area' },
 };
 
 module.exports = {
   EXPERTS,
+  INACTIVE_OWNER_IDS,
   EXCLUDED_OWNER_IDS,
   CAMP_EXPERTS_OFFICE_ID,
+  JUMP_BALL_OWNER_ID,
   WENDY_ID,
   ALLISON_ID,
   MANHATTAN_ROTATION,
@@ -552,6 +644,7 @@ module.exports = {
   INTERNATIONAL_FALLBACK,
   ZIP_ROUTES,
   AREA_CODE_ROUTES,
+  PHONE_CC_ROUTES,
   EXPERT_PROFILES,
   HUBSPOT_CHILD_OBJECT_ID,
   HUBSPOT_HOUSEHOLD_OBJECT_ID,
