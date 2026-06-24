@@ -1,4 +1,7 @@
 const { EXPERTS } = require('./routing-config');
+function safeLogError(params) {
+  try { require('./db').logError(params); } catch (e) { console.error('[safeLogError] Failed to log error:', e.message); }
+}
 
 const QUO_API_URL = 'https://api.openphone.com/v1/messages';
 const QUO_API_KEY = process.env.QUO_API_KEY;
@@ -46,24 +49,24 @@ async function sendExpertSms({ expertOwnerId, familyName, phone, city, zip, coun
   const lines = [];
 
   if (isReturningFamily) {
-    lines.push(`NEW WEB LEAD - RETURNING FAMILY`);
+    lines.push(`🏕️ NEW WEB LEAD - RETURNING FAMILY`);
   } else {
-    lines.push(`NEW WEB LEAD`);
+    lines.push(`🏕️ NEW WEB LEAD`);
   }
-  lines.push(`Please reach out ASAP!`);
+  lines.push(`New family just came in — go get 'em!`);
   lines.push('');
 
   lines.push(`Parent: ${familyName}`);
   if (phone) lines.push(`Phone: ${phone}`);
   if (email) lines.push(`Email: ${email}`);
-  const locationParts = [city, zip, country].filter(Boolean);
+  const locationParts = [city, zip].filter(Boolean);
   if (locationParts.length) lines.push(`Location: ${locationParts.join(', ')}`);
   lines.push('');
 
   if (children && children.length > 0) {
     lines.push(children.length === 1 ? `Child:` : `Children:`);
     for (const child of children) {
-      lines.push(`  - ${formatChildLine(child)}`);
+      lines.push(`  ${formatChildLine(child)}`);
     }
   }
 
@@ -92,12 +95,14 @@ async function sendExpertSms({ expertOwnerId, familyName, phone, city, zip, coun
     if (!res.ok) {
       const errorBody = await res.text();
       console.error(`[sms] Quo API returned ${res.status}: ${errorBody}`);
+      safeLogError({ source: 'sms', errorMessage: `Quo API ${res.status}: ${errorBody}`, context: { expertName: expert.name, familyName } });
       return;
     }
 
     console.log(`[sms] Text sent to ${expert.name} (${expert.phone}) via Quo`);
   } catch (err) {
     console.error(`[sms] Failed to text ${expert.name}:`, err.message);
+    safeLogError({ source: 'sms', errorMessage: err.message, context: { expertName: expert.name, familyName } });
   }
 }
 

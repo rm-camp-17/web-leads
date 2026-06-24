@@ -1,6 +1,9 @@
 const { Resend } = require('resend');
 const Anthropic = require('@anthropic-ai/sdk');
 const { EXPERTS } = require('./routing-config');
+function safeLogError(params) {
+  try { require('./db').logError(params); } catch (e) { console.error('[safeLogError] Failed to log error:', e.message); }
+}
 
 async function getResendCredentials() {
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
@@ -207,7 +210,8 @@ ${children.map((child, i) => {
   try {
     const resend = await getResendClient();
     await resend.emails.send({
-      from: 'Camp Experts <office@campexperts.com>',
+      from: 'Camp Experts <office@connections.campexpert.com>',
+      reply_to: 'office@campexperts.com',
       to: expert.email,
       subject,
       text,
@@ -216,10 +220,11 @@ ${children.map((child, i) => {
     console.log(`Notification sent to ${expert.name} (${expert.email})`);
   } catch (err) {
     console.error(`Failed to send notification to ${expert.email}:`, err.message);
+    safeLogError({ source: 'email-expert-notification', errorMessage: err.message, context: { expertEmail: expert.email, familyName } });
   }
 }
 
-async function sendFamilyAcknowledgment({ email, firstName, expertName }) {
+async function sendFamilyAcknowledgment({ email, firstName, expertName, expertEmail }) {
   const name = firstName || 'there';
 
   const html = `
@@ -253,19 +258,22 @@ The Camp Experts Team`;
   try {
     const resend = await getResendClient();
     await resend.emails.send({
-      from: 'Camp Experts <hey@campexperts.com>',
+      from: 'Camp Experts <hey@connections.campexpert.com>',
+      reply_to: expertEmail || 'riley@campexperts.com',
       to: email,
+      cc: expertEmail ? [expertEmail] : [],
       subject: `We've got you covered, ${name}`,
       text,
       html,
     });
-    console.log(`Family acknowledgment sent to ${email}`);
+    console.log(`Family acknowledgment sent to ${email} (cc: ${expertEmail || 'none'})`);
   } catch (err) {
     console.error(`Failed to send family acknowledgment to ${email}:`, err.message);
+    safeLogError({ source: 'email-family-acknowledgment', errorMessage: err.message, context: { email } });
   }
 }
 
-async function sendTimeoutFollowUp({ email, firstName }) {
+async function sendTimeoutFollowUp({ email, firstName, expertEmail }) {
   const name = firstName || 'there';
 
   const html = `
@@ -299,15 +307,18 @@ The Camp Experts Team`;
   try {
     const resend = await getResendClient();
     await resend.emails.send({
-      from: 'Camp Experts <hey@campexperts.com>',
+      from: 'Camp Experts <hey@connections.campexpert.com>',
+      reply_to: expertEmail || 'riley@campexperts.com',
       to: email,
+      cc: expertEmail ? [expertEmail] : [],
       subject: `We're here whenever you're ready`,
       text,
       html,
     });
-    console.log(`Timeout follow-up sent to ${email}`);
+    console.log(`Timeout follow-up sent to ${email} (cc: ${expertEmail || 'none'})`);
   } catch (err) {
     console.error(`Failed to send timeout follow-up to ${email}:`, err.message);
+    safeLogError({ source: 'email-timeout-followup', errorMessage: err.message, context: { email } });
   }
 }
 
@@ -367,7 +378,8 @@ ${payload.source_url ? `<p style="color:#666;font-size:12px;margin-top:16px;">Su
   try {
     const resend = await getResendClient();
     await resend.emails.send({
-      from: 'Camp Experts <office@campexperts.com>',
+      from: 'Camp Experts <office@connections.campexpert.com>',
+      reply_to: 'office@campexperts.com',
       to: RILEY_EMAIL,
       subject,
       text,
@@ -376,6 +388,59 @@ ${payload.source_url ? `<p style="color:#666;font-size:12px;margin-top:16px;">Su
     console.log(`[internal-form] "${formName}" forwarded to ${RILEY_EMAIL}`);
   } catch (err) {
     console.error(`[internal-form] Failed to send "${formName}" to ${RILEY_EMAIL}:`, err.message);
+    safeLogError({ source: 'email-internal-form', errorMessage: err.message, context: { formName } });
+  }
+}
+
+async function sendReneeFollowUpReminder({ familyName, familyEmail, familyPhone, children }) {
+  const childSummary = children.map(c => `${c.first_name} ${c.last_name}`).join(', ') || 'N/A';
+
+  const html = `
+<div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#333;">
+  <p>Hi Riley,</p>
+
+  <p>This is a reminder to check whether Renee has reached out to the <strong>${esc(familyName)}</strong> family yet.</p>
+
+  <p><strong>Details:</strong></p>
+  <ul>
+    <li>Family: ${esc(familyName)}</li>
+    <li>Email: ${esc(familyEmail)}</li>
+    <li>Phone: ${esc(familyPhone || 'N/A')}</li>
+    <li>Children: ${esc(childSummary)}</li>
+  </ul>
+
+  <p>This lead was assigned to Renee 6 hours ago. Please confirm she's made contact.</p>
+
+  <p>— Camp Experts Lead System</p>
+</div>
+`;
+
+  const text = `Hi Riley,
+
+This is a reminder to check whether Renee has reached out to the ${familyName} family yet.
+
+Family: ${familyName}
+Email: ${familyEmail}
+Phone: ${familyPhone || 'N/A'}
+Children: ${childSummary}
+
+This lead was assigned to Renee 6 hours ago. Please confirm she's made contact.
+
+— Camp Experts Lead System`;
+
+  try {
+    const resend = await getResendClient();
+    await resend.emails.send({
+      from: 'Camp Experts System <hey@connections.campexpert.com>',
+      to: 'riley@campexperts.com',
+      subject: `Follow-up check: Did Renee reach out to ${familyName}?`,
+      text,
+      html,
+    });
+    console.log(`[renee-followup] Reminder sent to riley@campexperts.com for ${familyName}`);
+  } catch (err) {
+    console.error(`[renee-followup] Failed to send reminder for ${familyName}:`, err.message);
+    safeLogError({ source: 'email-renee-followup', errorMessage: err.message, context: { familyName } });
   }
 }
 
@@ -384,4 +449,6 @@ module.exports = {
   sendFamilyAcknowledgment,
   sendTimeoutFollowUp,
   sendInternalFormNotification,
+  sendReneeFollowUpReminder,
+  getResendClient,
 };

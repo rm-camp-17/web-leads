@@ -1,5 +1,8 @@
 const { ReplitConnectors } = require('@replit/connectors-sdk');
 const { HUBSPOT_CHILD_OBJECT_ID, HUBSPOT_HOUSEHOLD_OBJECT_ID } = require('./routing-config');
+function safeLogError(params) {
+  try { require('./db').logError(params); } catch (e) { console.error('[safeLogError] Failed to log error:', e.message); }
+}
 
 const connectors = new ReplitConnectors();
 
@@ -93,6 +96,7 @@ async function searchHouseholdByEmail(email) {
     return data.results && data.results.length > 0 ? data.results[0] : null;
   } catch (err) {
     console.error('[hubspot] Household search by email failed:', err.message);
+    safeLogError({ source: 'hubspot-search-household', errorMessage: err.message, context: { email } });
     return null;
   }
 }
@@ -129,9 +133,11 @@ async function updateHousehold(householdRecordId, properties) {
 
 async function createChild({ firstName, lastName, birthDate, gender, interestedYear, budget, sessionLength, age, ownerId }) {
   const childId = `CH_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || '';
   const properties = {
     child_id: childId,
-    first_name: firstName || '',
+    first_name: fullName,
+    child_first_name: firstName || '',
     last_name: lastName || '',
   };
   if (birthDate) properties.dob = birthDate;
@@ -184,13 +190,14 @@ async function associateDealWithContact(dealId, contactId) {
   await associateObjects('deals', dealId, 'contacts', contactId, 3, 'HUBSPOT_DEFINED');
 }
 
-async function createDeal({ contactId, ownerId, dealName, householdId, childId }) {
+async function createDeal({ contactId, ownerId, dealName, householdId, childId, year }) {
   const properties = {
     dealname: dealName,
     dealstage: 'appointmentscheduled',
     hubspot_owner_id: ownerId,
     pipeline: 'default',
   };
+  if (year) properties.year1 = year;
   if (householdId) properties.associated_household_id = householdId;
   if (childId) properties.associated_child_id = childId;
 
@@ -231,7 +238,8 @@ async function getContactHouseholds(contactId) {
       { method: 'GET' }
     );
     return data.results || [];
-  } catch {
+  } catch (err) {
+    safeLogError({ source: 'hubspot-get-contact-households', errorMessage: err.message, context: { contactId } });
     return [];
   }
 }
@@ -243,7 +251,8 @@ async function getHouseholdContacts(householdId) {
       { method: 'GET' }
     );
     return data.results || [];
-  } catch {
+  } catch (err) {
+    safeLogError({ source: 'hubspot-get-household-contacts', errorMessage: err.message, context: { householdId } });
     return [];
   }
 }

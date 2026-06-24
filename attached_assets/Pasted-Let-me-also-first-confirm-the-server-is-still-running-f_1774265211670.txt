@@ -1,0 +1,26 @@
+Let me also first confirm the server is still running from the direct tab to verify we have a consistent state to compare against:
+
+Alright — here's the complete picture from live browser testing. There are three layers of failure, not just one:
+
+Layer 1: Replit Autoscale Cold Start (503) When the server is sleeping (scaled to zero), ALL requests — GET, POST, OPTIONS — return 503 with no CORS headers. Even a simple GET / fails cross-origin because the 503 response lacks Access-Control-Allow-Origin. The sendBeacon calls return true (queued), but the actual HTTP request silently fails or gets intercepted by Replit's __replshield which redirects to a login page and returns 403.
+
+Layer 2: OPTIONS Preflight Blocked by Replit Proxy Even when the server is confirmed running (verified via same-origin health check), the OPTIONS preflight request still returns 503. This means Replit's autoscale proxy is not forwarding OPTIONS requests to your Express app correctly. Since application/json triggers a preflight, every fetch call with Content-Type: application/json fails at the preflight stage before the POST is ever sent.
+
+Layer 3: The CORS config itself Your app.use(cors()) with default wildcard origin would also fail for credentialed sendBeacon requests, but we can't even see this issue because Layers 1-2 block all traffic before it reaches Express.
+
+What this means for the fix:
+
+The Webflow script and Express CORS patches I provided are correct and necessary, but they won't help until the Replit infrastructure issue is resolved. You need to address the deployment layer first. Here are your options:
+
+Switch from Replit autoscale to "always on" deployment. The .replit config currently has deploymentTarget = "autoscale". Change this to "static" or use Replit's Reserved VM option. This eliminates the cold-start 503s and the OPTIONS proxy issue.
+Move the webhook to a platform with reliable CORS handling like Railway, Render, or Fly.io. Replit's autoscale proxy transparently intercepts requests and doesn't reliably forward OPTIONS preflights.
+Add a keep-alive ping as a temporary workaround. A cron job (or UptimeRobot / BetterStack) hitting https://web-leads.replit.app/ every 2-3 minutes would keep the instance warm and prevent the 503 cold starts. This won't fix the OPTIONS proxy issue, but combined with the text/plain sendBeacon fallback (which avoids preflights entirely), it might work.
+Recommended deployment order if you go with option 3 (quickest):
+
+Set up an external health check pinging https://web-leads.replit.app/ every 2 minutes
+Deploy the patched index.js (adds text/plain body parsing + explicit CORS config)
+Update Webflow footer code (uses fetch with keepalive as primary, plain-string sendBeacon as fallback, MutationObserver as backup)
+Test a form submission and watch the Replit logs
+Want me to update the footer script to prioritize the text/plain sendBeacon path (since that avoids the OPTIONS preflight entirely), or do you want to tackle the Replit deployment configuration first?
+
+Claude reached its tool-use limit for this turn.

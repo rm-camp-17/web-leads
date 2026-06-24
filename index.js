@@ -1,4 +1,5 @@
 const express = require('express');
+const cors = require('cors');
 const { normalizeFields, isDetailedForm, extractChildren, mapBudget, extractLeadSource, normalizeCountry } = require('./field-normalizer');
 
 function isDomesticCountry(c) {
@@ -7,12 +8,40 @@ function isDomesticCountry(c) {
 const hubspot = require('./hubspot');
 const sb = require('./db');
 const { routeLead } = require('./routing-engine');
-const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp, sendInternalFormNotification } = require('./notifications');
+const { sendExpertNotification, sendFamilyAcknowledgment, sendTimeoutFollowUp, sendInternalFormNotification, sendReneeFollowUpReminder } = require('./notifications');
 const { sendExpertSms } = require('./sms');
 const { EXPERTS, CAMP_EXPERTS_OFFICE_ID } = require('./routing-config');
+const { startErrorMonitoring } = require('./error-monitor');
+
+const processingLocks = new Map();
+
+async function withEmailLock(email, fn) {
+  const key = email.toLowerCase();
+  while (processingLocks.has(key)) {
+    await processingLocks.get(key);
+  }
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  processingLocks.set(key, promise);
+  try {
+    return await fn();
+  } finally {
+    processingLocks.delete(key);
+    resolve();
+  }
+}
 
 const app = express();
+app.use(cors({
+  origin: [
+    'https://www.campexperts.com',
+    'https://campexperts.com',
+    'https://campexperts.webflow.io',
+  ],
+  credentials: true,
+}));
 app.use(express.json());
+app.use(express.text({ type: 'text/plain' }));
 
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', service: 'Camp Experts Lead Routing Engine' });
@@ -20,7 +49,7 @@ app.get('/', (_req, res) => {
 
 app.post('/api/webhook/webflow-lead', async (req, res) => {
   try {
-    const rawPayload = req.body;
+    const rawPayload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     console.log('[webhook] Received payload:', JSON.stringify(rawPayload));
 
     const formData = rawPayload.data || rawPayload;
@@ -33,15 +62,19 @@ app.post('/api/webhook/webflow-lead', async (req, res) => {
       return res.status(400).json({ error: 'Missing email' });
     }
 
-    if (isDetailedForm(normalized)) {
-      await handleDetailedForm(normalized, formData);
-    } else {
-      await handleShortForm(normalized, formData);
-    }
+    await withEmailLock(email, async () => {
+      if (isDetailedForm(normalized)) {
+        await handleDetailedForm(normalized, formData);
+      } else {
+        await handleShortForm(normalized, formData);
+      }
+    });
 
     res.json({ success: true });
   } catch (err) {
     console.error('[webhook] Error:', err.message, err.stack);
+    const email = (req.body?.email || req.body?.data?.email || '').toLowerCase();
+    sb.logError({ source: 'webhook', errorMessage: err.message, context: { email, stack: err.stack?.slice(0, 500) } });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -55,7 +88,7 @@ const INTERNAL_FORM_NAMES = [
 
 app.post('/api/webhook/webflow-internal', async (req, res) => {
   try {
-    const payload = req.body;
+    const payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const formName = payload._formName || payload.formName || payload['Form Name'] || 'Unknown Form';
     console.log(`[internal] Received "${formName}" submission`);
 
@@ -64,6 +97,8 @@ app.post('/api/webhook/webflow-internal', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('[internal] Error:', err.message, err.stack);
+    const rawBody = typeof req.body === 'object' ? req.body : {};
+    sb.logError({ source: 'internal-form', errorMessage: err.message, context: { formName: rawBody?.formName || rawBody?._formName || 'unknown' } });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -128,15 +163,25 @@ async function handleShortForm(normalized, rawPayload) {
 
   let contactId;
   if (!contact) {
-    const created = await hubspot.createContact({
-      firstName: normalized.first_name,
-      lastName: normalized.last_name,
-      email,
-      phone: normalized.phone,
-      ownerId: CAMP_EXPERTS_OFFICE_ID,
-    });
-    contactId = created.id;
-    console.log(`[short-form] Created HubSpot contact ${contactId}`);
+    try {
+      const created = await hubspot.createContact({
+        firstName: normalized.first_name,
+        lastName: normalized.last_name,
+        email,
+        phone: normalized.phone,
+        ownerId: CAMP_EXPERTS_OFFICE_ID,
+      });
+      contactId = created.id;
+      console.log(`[short-form] Created HubSpot contact ${contactId}`);
+    } catch (err) {
+      const existingIdMatch = err.message.match(/Existing ID:\s*(\d+)/);
+      if (existingIdMatch) {
+        contactId = existingIdMatch[1];
+        console.log(`[short-form] Contact already exists ${contactId}, using existing`);
+      } else {
+        throw err;
+      }
+    }
   } else {
     contactId = contact.id;
     console.log(`[short-form] Found existing HubSpot contact ${contactId}`);
@@ -166,6 +211,7 @@ async function handleShortForm(normalized, rawPayload) {
     console.log(`[short-form] Associated Contact ${contactId} ↔ Household ${householdRecordId}`);
   } catch (err) {
     console.error(`[short-form] Error creating household:`, err.message);
+    sb.logError({ source: 'short-form-household', errorMessage: err.message, context: { email, familyName } });
   }
 
   const pendingPayload = {
@@ -183,13 +229,19 @@ async function handleShortForm(normalized, rawPayload) {
   console.log(`[short-form] Inserted pending lead ${pendingLead.id}`);
 
   const pendingId = pendingLead.id;
-  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 4 * 60 * 1000);
-  console.log(`[short-form] Started 4-minute timeout for ${email}`);
+  setTimeout(() => handleTimeout(pendingId, contactId, email, normalized), 12 * 60 * 1000);
+  console.log(`[short-form] Started 12-minute timeout for ${email}`);
 }
 
 async function handleDetailedForm(normalized, rawPayload) {
   const email = normalized.email.toLowerCase();
   console.log(`[detailed-form] Processing for ${email}`);
+
+  const isDupe = await sb.isDuplicateDetailedForm(email);
+  if (isDupe) {
+    console.log(`[detailed-form] Duplicate within 6min for ${email}, skipping`);
+    return;
+  }
 
   const pendingLead = await sb.findPendingLeadByEmail(email);
 
@@ -197,14 +249,24 @@ async function handleDetailedForm(normalized, rawPayload) {
   let contactId;
 
   if (!contact) {
-    const created = await hubspot.createContact({
-      firstName: normalized.first_name,
-      lastName: normalized.last_name,
-      email,
-      phone: normalized.phone,
-    });
-    contactId = created.id;
-    console.log(`[detailed-form] Created HubSpot contact ${contactId}`);
+    try {
+      const created = await hubspot.createContact({
+        firstName: normalized.first_name,
+        lastName: normalized.last_name,
+        email,
+        phone: normalized.phone,
+      });
+      contactId = created.id;
+      console.log(`[detailed-form] Created HubSpot contact ${contactId}`);
+    } catch (err) {
+      const existingIdMatch = err.message.match(/Existing ID:\s*(\d+)/);
+      if (existingIdMatch) {
+        contactId = existingIdMatch[1];
+        console.log(`[detailed-form] Contact already exists ${contactId}, using existing`);
+      } else {
+        throw err;
+      }
+    }
   } else {
     contactId = contact.id;
     console.log(`[detailed-form] Found existing HubSpot contact ${contactId}`);
@@ -234,6 +296,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       console.log(`[detailed-form] Updated Household ${householdRecordId}`);
     } catch (err) {
       console.error(`[detailed-form] Error updating household:`, err.message);
+      sb.logError({ source: 'detailed-form-household', errorMessage: err.message, context: { email, familyName } });
     }
   } else {
     try {
@@ -266,6 +329,7 @@ async function handleDetailedForm(normalized, rawPayload) {
       await hubspot.associateContactWithHousehold(contactId, householdRecordId);
     } catch (err) {
       console.error(`[detailed-form] Error creating household:`, err.message);
+      sb.logError({ source: 'detailed-form-household', errorMessage: err.message, context: { email, familyName } });
     }
   }
 
@@ -311,19 +375,24 @@ async function handleDetailedForm(normalized, rawPayload) {
         dealName,
         householdId: householdRecordId || null,
         childId: created.id,
+        year,
       });
       console.log(`[detailed-form] Created deal ${deal.id} for ${dealName}`);
 
       return { childId: created.id, dealId: deal.id };
     } catch (err) {
       console.error(`[detailed-form] Error creating child/deal for ${child.first_name}:`, err.message);
+      sb.logError({ source: 'detailed-form-child-deal', errorMessage: err.message, context: { email, childName: `${child.first_name} ${child.last_name}` } });
       return null;
     }
   });
 
   const childDealResults = await Promise.all(childDealPromises);
 
-  await Promise.all([
+  const RENEE_ID = '87283318';
+  const isRenee = routingResult.expertId === RENEE_ID;
+
+  const notificationPromises = [
     sendExpertNotification({
       expertOwnerId: routingResult.expertId,
       lead: normalized,
@@ -345,12 +414,6 @@ async function handleDetailedForm(normalized, rawPayload) {
       description: normalized.description,
     }),
 
-    sendFamilyAcknowledgment({
-      email,
-      firstName: normalized.first_name,
-      expertName: expert?.name || 'Camp Experts',
-    }),
-
     sb.logAssignment({
       contactId,
       contactEmail: email,
@@ -370,7 +433,31 @@ async function handleDetailedForm(normalized, rawPayload) {
       ? sb.deletePendingLead(pendingLead.id).then(() =>
           console.log(`[detailed-form] Deleted pending lead ${pendingLead.id}`))
       : Promise.resolve(),
-  ]);
+  ];
+
+  if (!isRenee) {
+    notificationPromises.push(
+      sendFamilyAcknowledgment({
+        email,
+        firstName: normalized.first_name,
+        expertName: expert?.name || 'Camp Experts',
+        expertEmail: expert?.email,
+      })
+    );
+  } else {
+    console.log(`[detailed-form] Renee lead — skipping family acknowledgment email`);
+    setTimeout(() => {
+      sendReneeFollowUpReminder({
+        familyName,
+        familyEmail: email,
+        familyPhone: normalized.phone,
+        children,
+      });
+    }, 6 * 60 * 60 * 1000);
+    console.log(`[detailed-form] Scheduled 6-hour follow-up reminder for Riley re: ${familyName}`);
+  }
+
+  await Promise.all(notificationPromises);
 
   console.log(`[detailed-form] Complete: ${familyName} → ${expert?.name || routingResult.expertId}`);
 }
@@ -427,7 +514,7 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
     if (householdRecordId) {
       promises.push(
         hubspot.updateHousehold(householdRecordId, { hubspot_owner_id: CAMP_EXPERTS_OFFICE_ID })
-          .catch(err => console.error(`[timeout] Failed to update household owner:`, err.message))
+          .catch(err => { console.error(`[timeout] Failed to update household owner:`, err.message); sb.logError({ source: 'timeout-household-update', errorMessage: err.message, context: { email } }); })
       );
     }
 
@@ -435,21 +522,20 @@ async function handleTimeout(pendingLeadId, contactId, email, normalized) {
 
     console.log(`[timeout] Assigned ${email} to Camp Experts Office (timeout)`);
 
-    setTimeout(() => {
-      sendTimeoutFollowUp({
-        email,
-        firstName: normalized.first_name,
-      }).catch(err => console.error(`[timeout-followup] Error for ${email}:`, err.message));
-    }, 6 * 60 * 1000);
-    console.log(`[timeout] Scheduled follow-up email to ${email} in 6 minutes`);
+    sendTimeoutFollowUp({
+      email,
+      firstName: normalized.first_name,
+    }).catch(err => { console.error(`[timeout-followup] Error for ${email}:`, err.message); sb.logError({ source: 'timeout-followup-email', errorMessage: err.message, context: { email } }); });
+    console.log(`[timeout] Sent follow-up email to ${email}`);
   } catch (err) {
     console.error(`[timeout] Error handling timeout for ${email}:`, err.message);
+    sb.logError({ source: 'timeout', errorMessage: err.message, context: { email } });
   }
 }
 
 setInterval(async () => {
   try {
-    const expired = await sb.getExpiredPendingLeads(4);
+    const expired = await sb.getExpiredPendingLeads(12);
     for (const lead of expired) {
       console.log(`[cleanup] Found expired pending lead: ${lead.email}`);
       try {
@@ -470,17 +556,17 @@ setInterval(async () => {
         await sb.deletePendingLead(lead.id);
         const leadEmail = lead.email;
         const leadFirstName = lead.raw_payload?.first_name || lead.raw_payload?.First_Name;
-        setTimeout(() => {
-          sendTimeoutFollowUp({ email: leadEmail, firstName: leadFirstName })
-            .catch(err => console.error(`[cleanup-followup] Error for ${leadEmail}:`, err.message));
-        }, 6 * 60 * 1000);
+        sendTimeoutFollowUp({ email: leadEmail, firstName: leadFirstName })
+          .catch(err => { console.error(`[cleanup-followup] Error for ${leadEmail}:`, err.message); sb.logError({ source: 'cleanup-followup-email', errorMessage: err.message, context: { email: leadEmail } }); });
         console.log(`[cleanup] Processed expired lead ${lead.email}`);
       } catch (err) {
         console.error(`[cleanup] Error processing expired lead ${lead.email}:`, err.message);
+        sb.logError({ source: 'cleanup', errorMessage: err.message, context: { email: lead.email } });
       }
     }
   } catch (err) {
     console.error('[cleanup] Error checking expired leads:', err.message);
+    sb.logError({ source: 'cleanup', errorMessage: err.message, context: { operation: 'expired-leads-check' } });
   }
 }, 5 * 60 * 1000);
 
@@ -488,6 +574,7 @@ const PORT = process.env.PORT || 5000;
 
 async function start() {
   await sb.initDatabase();
+  startErrorMonitoring();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Camp Experts Lead Routing Engine running on port ${PORT}`);
   });

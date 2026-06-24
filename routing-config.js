@@ -53,10 +53,6 @@ const EXPERTS = {
   '86362403': { name: 'Camp Experts Office', email: 'office@campexperts.com', phone: '+12122887892' },
 };
 
-if (process.env.TEST_MODE === 'true') {
-  EXPERTS['86362403'] = { name: 'Riley (Test Mode)', email: 'riley@campexperts.com', phone: '+19124141215' };
-}
-
 // Departed / inactive experts — NEVER route new leads to these seats, and skip
 // them when matching an "existing family" so a returning family routes by
 // geography instead of dead-ending on someone who is no longer here.
@@ -223,6 +219,9 @@ const ZIP_ROUTES = {
   '10804': '87283323',
   '10805': '87283323',
 
+  // === BROOKLYN ===
+  '112': '87283301',   // Brooklyn → Laurie Karol
+
   // === LONG ISLAND ===
   '110': '87283301',   // Nassau → Laurie Karol
   '115': '87283301',   // Nassau → Laurie Karol
@@ -276,13 +275,15 @@ const ZIP_ROUTES = {
 
   // === DC / VIRGINIA ===
   '200': '87283304',   // DC → Lindsey Binstock
-  '201': '87283304',
-  '220': '87283304',   // Northern Virginia
-  '221': '87283304',   // Arlington/Alexandria
-  '222': '87283304',   // Fairfax
-  '223': '87283304',
-  '230': '87283304',   // Richmond
-  '231': '87283304',
+  '201': '87283304',   // Northern Virginia (Dulles/Ashburn)
+  // All Virginia ZIP prefixes (220–246) → Lindsey Binstock
+  '220': '87283304', '221': '87283304', '222': '87283304', '223': '87283304',
+  '224': '87283304', '225': '87283304', '226': '87283304', '227': '87283304',
+  '228': '87283304', '229': '87283304', '230': '87283304', '231': '87283304',
+  '232': '87283304', '233': '87283304', '234': '87283304', '235': '87283304',
+  '236': '87283304', '237': '87283304', '238': '87283304', '239': '87283304',
+  '240': '87283304', '241': '87283304', '242': '87283304', '243': '87283304',
+  '244': '87283304', '245': '87283304', '246': '87283304',
 
   // === NORTH CAROLINA ===
   '270': '87283304', '271': '87283304', '272': '87283304', '273': '87283304',
@@ -437,7 +438,7 @@ const ZIP_ROUTES = {
   '102': MANHATTAN_ROTATION,
   '107': '87283309', // Yonkers / central Westchester → Michele Gershwin
   '108': '87283323', // New Rochelle / lower Westchester → Shari Levine
-  '112': '87283301', // Brooklyn → Laurie Karol
+  // '112' (Brooklyn → Laurie Karol) already defined above
   '113': '87283301', // Queens → Laurie Karol
   '077': '87283320', // Monmouth / NJ shore → Risa Goldberg
   '078': '87283320',
@@ -479,8 +480,8 @@ const AREA_CODE_ROUTES = {
   '215': '87283274', '267': '87283274', '610': '87283293', '484': '87283293',
   // Baltimore/MD
   '410': '87283312', '443': '87283312',
-  // DC/VA
-  '202': '87283304', '703': '87283304', '571': '87283304',
+  // DC/VA routing is ZIP-based only (prefixes 200/201, 220–246) — phone
+  // area codes are not used here since they don't reliably reflect location.
   // Pittsburgh
   '412': '87283304',
   // NC

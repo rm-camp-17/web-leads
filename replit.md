@@ -6,7 +6,7 @@ A Node.js/Express backend service that routes leads from Webflow form submission
 ## Architecture
 - **Runtime**: Node.js 20, Express.js
 - **Database**: Replit PostgreSQL (via `pg` package, `DATABASE_URL`)
-- **Integrations**: HubSpot (CRM), Resend (email), Twilio (SMS) — all via Replit Connectors (`@replit/connectors-sdk`)
+- **Integrations**: HubSpot (CRM), Resend (email), Quo/OpenPhone (SMS) — via Replit Connectors + direct API
 - **Optional**: Anthropic SDK for AI-personalized lead summaries and AI routing fallback
 
 ## Project Structure
@@ -19,7 +19,8 @@ A Node.js/Express backend service that routes leads from Webflow form submission
 | `hubspot.js` | HubSpot CRM API wrapper (Households, Contacts, Children, Deals, 6 association types) |
 | `db.js` | PostgreSQL database layer (pending leads, assignment log with lead source, Manhattan rotation) |
 | `notifications.js` | Email notifications via Resend (expert, family, timeout, internal form forwarding) |
-| `sms.js` | SMS alerts via Twilio |
+| `sms.js` | SMS alerts via Quo (OpenPhone API) |
+| `error-monitor.js` | Scheduled error reports at 9am/5pm ET via node-cron, AI summary, Resend email |
 
 ## Key Endpoints
 - `GET /` — Health check
@@ -38,8 +39,20 @@ A Node.js/Express backend service that routes leads from Webflow form submission
 - `pending_leads` — Buffer for short-form submissions waiting for detailed form (4-min timeout)
 - `assignment_log` — Records every routing decision, includes `lead_source` and `lead_source_detail` (JSONB)
 - `manhattan_rotation` — Round-robin counter for NYC area leads (2:1 Wendy:Allison ratio)
+- `error_log` — Captures all processing errors with source, message, context (JSONB), and `reported` flag
 
 ## Environment
 - Server runs on port 5000 (0.0.0.0)
 - Database auto-initializes on startup with column migrations
-- Integrations authenticate via Replit Connectors (no manual API keys needed for HubSpot, Resend, Twilio)
+- Integrations authenticate via Replit Connectors (HubSpot, Resend) and env vars (QUO_API_KEY, QUO_FROM_NUMBER for SMS)
+- Email sends from `connections.campexpert.com` (verified Resend domain), with reply-to set to expert's `@campexperts.com` address
+- Family-facing emails CC the assigned expert
+- TEST_MODE env var removed — routing uses real geographic/CRM rules
+
+## Error Monitoring
+- `error-monitor.js` — Cron-scheduled error reporting (node-cron)
+- Runs at 9:00 AM and 5:00 PM ET daily
+- Errors are captured to `error_log` table from all processing handlers (webhook, HubSpot, email, SMS)
+- If errors exist: AI (Claude) summarizes them in plain language, email sent to riley@campexperts.com with error table + summary
+- If no errors: sends "all clear" status email
+- Errors are marked `reported = true` after each report to avoid double-counting

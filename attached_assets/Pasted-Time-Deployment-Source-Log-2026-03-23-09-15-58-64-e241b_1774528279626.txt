@@ -1,0 +1,148 @@
+Time
+Deployment
+Source
+Log
+2026-03-23 09:15:58.64
+e241b397
+User
+at async /home/runner/workspace/index.js:49:7
+2026-03-24 21:25:16.45
+cef3af87
+System
+command finished with error [node index.js]: signal: terminated
+2026-03-24 21:25:29.25
+7b837aad
+User
+To prepare for this change:
+2026-03-24 21:25:29.25
+7b837aad
+User
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+2026-03-24 21:25:29.25
+7b837aad
+User
+(Use `node --trace-warnings ...` to show where the warning was created)
+2026-03-24 21:25:29.25
+7b837aad
+User
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+2026-03-24 21:25:29.25
+7b837aad
+User
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+2026-03-24 21:25:29.25
+7b837aad
+User
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+2026-03-24 21:25:29.25
+7b837aad
+User
+(node:18) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+2026-03-25 16:41:30.74
+7b837aad
+System
+command finished with error [node index.js]: signal: terminated
+2026-03-25 16:41:34.51
+cd6d01c3
+User
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+2026-03-25 16:41:34.51
+cd6d01c3
+User
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+2026-03-25 16:41:34.51
+cd6d01c3
+User
+To prepare for this change:
+2026-03-25 16:41:34.51
+cd6d01c3
+User
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+2026-03-25 16:41:34.51
+cd6d01c3
+User
+(Use `node --trace-warnings ...` to show where the warning was created)
+2026-03-25 16:41:34.51
+cd6d01c3
+User
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+2026-03-25 16:41:34.51
+cd6d01c3
+User
+(node:17) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+at async Object.createContact (/home/runner/workspace/hubspot.js:61:16)
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:64:5
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+at async handleShortForm (/home/runner/workspace/index.js:161:21)
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+at hubspotFetch (/home/runner/workspace/hubspot.js:19:11)
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:68:9
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+at async withEmailLock (/home/runner/workspace/index.js:26:12)
+2026-03-25 21:18:18.70
+cd6d01c3
+User
+[webhook] Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211643060900","correlationId":"69c4895a-0000-0000-3f5b-1896b298d14f","category":"CONFLICT"} Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211643060900","correlationId":"69c4895a-0000-0000-3f5b-1896b298d14f","category":"CONFLICT"}
+2026-03-25 21:22:00.05
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Giavana: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c48a37-0000-0000-2d15-b1f32851d8a4","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-25 23:17:39.93
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Dora: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c4a553-0000-0000-2761-737ba022fd6a","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+[webhook] Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211663262084","correlationId":"69c4c584-0000-0000-40ff-d4d183033188","category":"CONFLICT"} Error: HubSpot API POST /crm/v3/objects/contacts → 409: {"status":"error","message":"Contact already exists. Existing ID: 211663262084","correlationId":"69c4c584-0000-0000-40ff-d4d183033188","category":"CONFLICT"}
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:64:5
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at async /home/runner/workspace/index.js:68:9
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at hubspotFetch (/home/runner/workspace/hubspot.js:19:11)
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at async withEmailLock (/home/runner/workspace/index.js:26:12)
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at async handleShortForm (/home/runner/workspace/index.js:161:21)
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at async Object.createContact (/home/runner/workspace/hubspot.js:61:16)
+2026-03-26 01:35:01.11
+cd6d01c3
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2026-03-26 01:37:06.93
+cd6d01c3
+User
+[detailed-form] Error creating child/deal for Adriana: HubSpot API POST /crm/v3/objects/2-50911061 → 400: {"status":"error","message":"Error creating child. Some required properties were not set.","correlationId":"69c4c602-0000-0000-5f78-937cfbcb4e94","context":{"properties":["first_name"]},"category":"VALIDATION_ERROR"}

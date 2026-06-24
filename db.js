@@ -64,6 +64,18 @@ async function initDatabase() {
         RETURN new_counter;
       END;
       $$ LANGUAGE plpgsql;
+
+      CREATE TABLE IF NOT EXISTS error_log (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        source TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        context JSONB,
+        reported BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_error_log_created ON error_log(created_at);
+      CREATE INDEX IF NOT EXISTS idx_error_log_reported ON error_log(reported);
     `);
 
     await addColumnIfNotExists(client, 'assignment_log', 'lead_source', 'TEXT');
@@ -116,6 +128,17 @@ async function isDuplicateShortForm(email) {
      WHERE email = $1 AND created_at >= $2
      LIMIT 1`,
     [email.toLowerCase(), sixHoursAgo]
+  );
+  return rows.length > 0;
+}
+
+async function isDuplicateDetailedForm(email) {
+  const sixMinutesAgo = new Date(Date.now() - 6 * 60_000).toISOString();
+  const { rows } = await pool.query(
+    `SELECT id FROM assignment_log
+     WHERE contact_email = $1 AND created_at >= $2
+     LIMIT 1`,
+    [email.toLowerCase(), sixMinutesAgo]
   );
   return rows.length > 0;
 }
@@ -191,7 +214,7 @@ async function getNextManhattanExpert() {
   return newCounter % 3 < 2 ? WENDY_ID : ALLISON_ID;
 }
 
-async function getExpiredPendingLeads(minutesOld = 4) {
+async function getExpiredPendingLeads(minutesOld = 12) {
   const cutoff = new Date(Date.now() - minutesOld * 60_000).toISOString();
   const { rows } = await pool.query(
     `SELECT * FROM pending_leads
@@ -201,15 +224,50 @@ async function getExpiredPendingLeads(minutesOld = 4) {
   return rows || [];
 }
 
+async function logError({ source, errorMessage, context }) {
+  try {
+    await pool.query(
+      `INSERT INTO error_log (source, error_message, context)
+       VALUES ($1, $2, $3)`,
+      [source, errorMessage, context ? JSON.stringify(context) : null]
+    );
+  } catch (err) {
+    console.error('[db] Failed to log error to error_log table:', err.message);
+  }
+}
+
+async function getUnreportedErrors(limit = 100) {
+  const { rows } = await pool.query(
+    `SELECT * FROM error_log
+     WHERE reported = false
+     ORDER BY created_at ASC
+     LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+async function markErrorsReported(ids) {
+  if (!ids || ids.length === 0) return;
+  await pool.query(
+    `UPDATE error_log SET reported = true WHERE id = ANY($1)`,
+    [ids]
+  );
+}
+
 module.exports = {
   pool,
   initDatabase,
   insertPendingLead,
   findPendingLeadByEmail,
   isDuplicateShortForm,
+  isDuplicateDetailedForm,
   deletePendingLead,
   markPendingLeadProcessed,
   logAssignment,
   getNextManhattanExpert,
   getExpiredPendingLeads,
+  logError,
+  getUnreportedErrors,
+  markErrorsReported,
 };

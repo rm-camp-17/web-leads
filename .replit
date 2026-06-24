@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "python-3.11"]
+modules = ["nodejs-20", "python-3.11", "postgresql-16"]
 [agent]
 expertMode = true
 integrations = ["hubspot:1.0.0", "resend:1.0.0", "twilio:1.0.0"]
@@ -35,13 +35,14 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "autoscale"
+deploymentTarget = "gce"
 run = ["node", "index.js"]
 
 [userenv]
 
 [userenv.development]
-TEST_MODE = "true"
 
 [userenv.shared]
 QUO_FROM_NUMBER = "PN2eZmOK3I"
+
+[userenv.production]
