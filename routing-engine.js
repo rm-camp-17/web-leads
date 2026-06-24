@@ -29,6 +29,12 @@ async function routeLead(lead) {
     const aiResult = await checkAiRouting(lead);
     if (aiResult) return aiResult;
 
+    // Nothing matched. A US-looking lead in an uncovered area is a "jump ball"
+    // → Lindsey Schwimmer. Anything else (unresolved international / no signal)
+    // stays with the office.
+    if (looksDomestic(lead)) {
+      return { expertId: config.JUMP_BALL_OWNER_ID, rule: 'jump_ball_us_gap' };
+    }
     return { expertId: config.CAMP_EXPERTS_OFFICE_ID, rule: 'fallback_no_match' };
   } catch (err) {
     console.error('Routing engine error, falling back to office:', err.message);
@@ -111,23 +117,83 @@ function checkRequestedExpert(sourceUrl) {
   return null;
 }
 
+const US_COUNTRY_NAMES = [
+  'united states', 'united states of america', 'us', 'u.s.', 'u.s.a.', 'usa', 'america',
+];
+
+// Parse an international dialing code from a phone number.
+// Returns null for bare/US-format numbers (so US area-code routing still runs);
+// { isUs:true } for +1 numbers; { cc, expertId } for recognised intl numbers.
+// IMPORTANT: a 10-digit US number like 330-555-1234 must NOT be read as "+33"
+// (France) — we only treat a number as international when it is dialed that way
+// (leading "+" or "00").
+function parsePhoneCC(phone) {
+  if (!phone) return null;
+  const digits = String(phone).trim().replace(/[\s()\-\.]/g, '');
+  let intl = null;
+  if (digits.startsWith('+')) intl = digits.slice(1);
+  else if (digits.startsWith('00')) intl = digits.slice(2);
+  if (!intl || !/^\d+$/.test(intl)) return null;
+  if (intl.startsWith('1') && intl.length >= 11) return { cc: '1', isUs: true };
+  for (const len of [3, 2]) {
+    const cc = intl.slice(0, len);
+    if (config.PHONE_CC_ROUTES[cc]) return { cc, isUs: false, expertId: config.PHONE_CC_ROUTES[cc] };
+  }
+  return { cc: intl.slice(0, 2), isUs: false, expertId: null };
+}
+
+function isUsCountry(country) {
+  return !!country && US_COUNTRY_NAMES.includes(country.trim().toLowerCase());
+}
+
 function checkInternational(country, phone) {
-  if (country && country.toLowerCase() !== 'united states' && country.toLowerCase() !== 'us' && country.toLowerCase() !== 'usa') {
-    const expertId = config.INTERNATIONAL_ROUTES[country];
+  // 1) An explicit non-US country always wins.
+  if (country && country.trim()) {
+    if (isUsCountry(country)) return null; // US — hand off to domestic routing
+    const expertId = config.INTERNATIONAL_ROUTES[country.trim()];
     if (expertId) {
-      return { expertId, rule: `international_${country.toLowerCase().replace(/\s+/g, '_')}` };
+      return { expertId, rule: `international_${country.trim().toLowerCase().replace(/\s+/g, '_')}` };
     }
-    return { expertId: config.INTERNATIONAL_FALLBACK, rule: `international_fallback_${country.toLowerCase().replace(/\s+/g, '_')}` };
+    // Unknown non-US country label — try the phone dialing code before the office.
+    const byPhone = parsePhoneCC(phone);
+    if (byPhone && byPhone.expertId) {
+      return { expertId: byPhone.expertId, rule: `international_phone_cc_${byPhone.cc}` };
+    }
+    return { expertId: config.INTERNATIONAL_FALLBACK, rule: `international_fallback_${country.trim().toLowerCase().replace(/\s+/g, '_')}` };
   }
 
-  if (phone) {
-    const cleaned = phone.replace(/[\s()-]/g, '');
-    if (cleaned.startsWith('+') && !cleaned.startsWith('+1')) {
-      return { expertId: config.INTERNATIONAL_FALLBACK, rule: 'international_phone_prefix' };
+  // 2) Country is blank — fall back to the phone dialing code.
+  // This is the fix for European ZIPs that collide with US prefixes
+  // (e.g. Paris 75008 vs Dallas 750): a +33 phone routes to the France expert
+  // BEFORE the US ZIP table ever sees "75008".
+  const byPhone = parsePhoneCC(phone);
+  if (byPhone && !byPhone.isUs) {
+    if (byPhone.expertId) {
+      return { expertId: byPhone.expertId, rule: `international_phone_cc_${byPhone.cc}` };
     }
+    return { expertId: config.INTERNATIONAL_FALLBACK, rule: 'international_phone_prefix' };
   }
 
   return null;
+}
+
+// Does this lead look like a US (domestic) lead? Used to decide whether an
+// unmatched lead is a domestic "jump ball" (→ Lindsey) or unresolved
+// international (→ office).
+function looksDomestic(lead) {
+  if (isUsCountry(lead.country)) return true;
+  const pc = parsePhoneCC(lead.phone);
+  if (pc) {
+    if (pc.isUs) return true;
+    return false; // a recognised international dialing code → not domestic
+  }
+  if (lead.phone) {
+    const d = String(lead.phone).replace(/[\s()+\-\.]/g, '');
+    if (d.length === 10 || (d.length === 11 && d.startsWith('1'))) return true;
+  }
+  // No international signal at all + a US-format ZIP → treat as domestic.
+  if (lead.zip && /^\d{5}$/.test(String(lead.zip).replace(/[\s-]/g, '').substring(0, 5))) return true;
+  return false;
 }
 
 async function checkDomestic(zip, phone) {
@@ -172,6 +238,20 @@ function getExpertByZip(zip) {
     return { expertId: config.ZIP_ROUTES[prefix3], rule: `zip_prefix_${prefix3}` };
   }
 
+  // Whole-state default (single-expert states) — applied only after metro rules miss.
+  const state = zip3ToState(prefix3);
+  if (state && config.STATE_ROUTES[state]) {
+    return { expertId: config.STATE_ROUTES[state], rule: `state_${state}` };
+  }
+
+  return null;
+}
+
+// Map a 3-digit ZIP prefix to its US state via the SCF allocation table.
+function zip3ToState(prefix3) {
+  const n = parseInt(prefix3, 10);
+  if (Number.isNaN(n)) return null;
+  for (const [a, b, st] of config.ZIP3_STATE_RANGES) if (n >= a && n <= b) return st;
   return null;
 }
 
@@ -258,4 +338,4 @@ async function testRoute(lead) {
   return routeLead(lead);
 }
 
-module.exports = { routeLead, testRoute, getExpertByZip };
+module.exports = { routeLead, testRoute, getExpertByZip, checkInternational, looksDomestic, parsePhoneCC };
