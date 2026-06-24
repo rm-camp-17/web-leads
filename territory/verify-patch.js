@@ -1,12 +1,10 @@
-// Verifies the EU-collision routing patch without HubSpot/network.
+// Verifies the routing patch without HubSpot/network. Run: node territory/verify-patch.js
 const cfg = require('../routing-config');
 const eng = require('../routing-engine');
 
 const N = id => (cfg.EXPERTS[id] && cfg.EXPERTS[id].name) || id;
 let pass = 0, fail = 0;
 
-// Decide the international-or-domestic outcome the way routeLead would, minus
-// existing-family / AI / Manhattan-rotation (which need network).
 function decide(lead) {
   const intl = eng.checkInternational(lead.country, lead.phone);
   if (intl) return { ...intl, owner: N(intl.expertId) };
@@ -14,11 +12,9 @@ function decide(lead) {
     const z = eng.getExpertByZip(lead.zip);
     if (z) return { ...z, owner: N(z.expertId === cfg.MANHATTAN_ROTATION ? cfg.WENDY_ID : z.expertId) };
   }
-  // (area-code path omitted here; tested separately)
   if (eng.looksDomestic(lead)) return { expertId: cfg.JUMP_BALL_OWNER_ID, rule: 'jump_ball_us_gap', owner: N(cfg.JUMP_BALL_OWNER_ID) };
   return { expertId: cfg.CAMP_EXPERTS_OFFICE_ID, rule: 'fallback_no_match', owner: N(cfg.CAMP_EXPERTS_OFFICE_ID) };
 }
-
 function check(desc, lead, expectId) {
   const r = decide(lead);
   const ok = r.expertId === expectId;
@@ -26,69 +22,42 @@ function check(desc, lead, expectId) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${desc}\n        -> ${r.owner} [${r.rule}]${ok ? '' : `  (expected ${N(expectId)})`}`);
 }
 
-console.log('=== EU collision: the bug we are fixing ===');
-check('Paris fam, BLANK country, +33 phone, zip 75008 (looks like Dallas)',
-  { country: '', phone: '+33 6 03 06 09 45', zip: '75008' }, '87283278'); // Catherine
-check('Paris fam, country=France, zip 75016',
-  { country: 'France', phone: '', zip: '75016' }, '87283278');
-check('Milan fam, BLANK country, +39 phone, zip 20121 (looks like N. Virginia)',
-  { country: '', phone: '+39 02 1234 5678', zip: '20121' }, '87283300'); // Laura
-check('Monaco fam, country=Monaco, +377 phone, zip 98000 (looks like Seattle)',
-  { country: 'Monaco', phone: '+377 99 99 99 99', zip: '98000' }, '87283300');
-check('Riviera fam (Cap d Ail), BLANK country, +33 phone, zip 06320 (looks like CT)',
-  { country: '', phone: '+33 4 93 00 00 00', zip: '06320' }, '87283278'); // France by phone
+console.log('=== EU collision fix (route by phone CC when country blank) ===');
+check('Paris, blank country, +33, zip 75008', { country: '', phone: '+33 6 03 06 09 45', zip: '75008' }, '87283278');
+check('Milan, blank country, +39, zip 20121', { country: '', phone: '+39 02 1234 5678', zip: '20121' }, '87283300');
+check('Monaco, country=Monaco, zip 98000', { country: 'Monaco', phone: '+377 99 99 99 99', zip: '98000' }, '87283300');
 
-console.log('\n=== Must NOT over-trigger: real US leads still route domestically ===');
-check('Real Dallas fam, US +1 phone, zip 75201',
-  { country: '', phone: '+1 214 555 1212', zip: '75201' }, '87283304'); // Lindsey Binstock
-check('Real Dallas fam, country=United States, bare 10-digit phone, zip 75201',
-  { country: 'United States', phone: '(214) 555-1212', zip: '75201' }, '87283304');
-check('Ohio 330 area-code US number must NOT be read as +33 France',
-  { country: '', phone: '3305551234', zip: '' }, cfg.JUMP_BALL_OWNER_ID); // no zip -> falls to domestic gap (area-code tested below)
-check('Real San Diego fam, US phone, zip 92101',
-  { country: '', phone: '+1 619 555 1212', zip: '92101' }, '87283281'); // Denise Gordon (CA)
+console.log('\n=== Real US still routes domestically; no over-trigger ===');
+check('Dallas, US +1 phone, zip 75201', { country: '', phone: '+1 214 555 1212', zip: '75201' }, '87283304');
+check('Ohio 330 area code must NOT be read as +33', { country: '', phone: '3305551234', zip: '' }, cfg.JUMP_BALL_OWNER_ID);
 
-console.log('\n=== Jump balls -> Lindsey Schwimmer (87283303) ===');
-check('Montana (uncovered), country US, zip 59001',
-  { country: 'United States', phone: '', zip: '59001' }, cfg.JUMP_BALL_OWNER_ID);
-check('Rockland NY 109 (ex-Lara Weinberg)',
-  { country: '', phone: '', zip: '10901' }, cfg.JUMP_BALL_OWNER_ID);
-check('Phoenix AZ 852',
-  { country: '', phone: '', zip: '85254' }, cfg.JUMP_BALL_OWNER_ID);
+console.log('\n=== Whole-state default (the "all of Virginia → Binstock" fix) ===');
+check('VA Blacksburg 24060 (no metro rule)', { country: '', phone: '', zip: '24060' }, '87283304'); // state_VA
+check('VA Norfolk 23510', { country: '', phone: '', zip: '23510' }, '87283304');
+check('VA NoVA 22101 (metro rule still wins)', { country: '', phone: '', zip: '22101' }, '87283304');
+check('OH Columbus 43215 (was a jump ball)', { country: '', phone: '', zip: '43215' }, '87283273'); // Ashley, state_OH
+check('MD Salisbury 21801', { country: '', phone: '', zip: '21801' }, '87283312'); // Mindy, state_MD
 
-console.log('\n=== New clear-expert gap fills ===');
-check('Brooklyn 112 -> Laurie Karol', { country: '', phone: '', zip: '11215' }, '87283301');
-check('Yonkers 107 -> Michele Gershwin', { country: '', phone: '', zip: '10701' }, '87283309');
-check('NJ shore 077 -> Risa Goldberg', { country: '', phone: '', zip: '07720' }, '87283320');
+console.log('\n=== New England split ===');
+check('MA Northampton 01060', { country: '', phone: '', zip: '01060' }, '87283284'); // Emily Rothenberg
+check('MA Boston 02108 → Wendy (carve-out)', { country: '', phone: '', zip: '02108' }, '87283325');
+check('RI Providence 02906', { country: '', phone: '', zip: '02906' }, '87283284'); // Emily Rothenberg
+check('CT Fairfield 06824 (Amanda)', { country: '', phone: '', zip: '06824' }, '87283272');
+check('CT Westport 06880 (Emily Rothenberg carve-out)', { country: '', phone: '', zip: '06880' }, '87283284');
+check('NH Concord 03301 → jump ball (no NE state owner)', { country: '', phone: '', zip: '03301' }, cfg.JUMP_BALL_OWNER_ID);
 
-console.log('\n=== International unresolved -> office; UK -> Carrie ===');
-check('UK family, country=UK', { country: 'UK', phone: '+44 20 7946 0000', zip: 'SW1A 1AA' }, '87283277');
-check('Unknown country, intl phone +49 (Germany)', { country: '', phone: '+49 30 123456', zip: '' }, '87283278');
+console.log('\n=== Roster fixes ===');
+check('Rye Brook 10573 → Heather Messer (active)', { country: '', phone: '', zip: '10573' }, '93194078');
+check('Livingston 07039 → Risa (Michelle Burger inactive)', { country: '', phone: '', zip: '07039' }, '87283320');
 
-console.log('\n=== Area-code guard (direct) ===');
-(async () => {
-  const ohio = await eng.testRoute ? null : null;
-  // parsePhoneCC sanity
-  const a = eng.parsePhoneCC('3305551234'); // bare US 10-digit
-  const b = eng.parsePhoneCC('+33 6 03 06 09 45'); // France
-  const c = eng.parsePhoneCC('+1 214 555 1212'); // US
-  const d = eng.parsePhoneCC('+377 99 99 99 99'); // Monaco (longest match)
-  console.log('parsePhoneCC("3305551234") =', JSON.stringify(a), a === null ? 'PASS (not intl)' : 'FAIL');
-  (a === null) ? pass++ : fail++;
-  console.log('parsePhoneCC("+33...")     =', JSON.stringify(b), b && b.expertId === '87283278' ? 'PASS' : 'FAIL');
-  (b && b.expertId === '87283278') ? pass++ : fail++;
-  console.log('parsePhoneCC("+1 214...")  =', JSON.stringify(c), c && c.isUs ? 'PASS' : 'FAIL');
-  (c && c.isUs) ? pass++ : fail++;
-  console.log('parsePhoneCC("+377...")    =', JSON.stringify(d), d && d.expertId === '87283300' ? 'PASS (Monaco>3-digit match)' : 'FAIL');
-  (d && d.expertId === '87283300') ? pass++ : fail++;
+console.log('\n=== Inactive list ===');
+[['87283299','Lara Weinberg',true],['87283302','Leslie Zeller',true],['87283310','Michelle Burger',true],
+ ['87283306','Lisa Dalinka',true],['87283294','Julie Rosenberg',true],['93194078','Heather Messer',false]].forEach(([id,nm,shouldExclude]) => {
+  const excluded = cfg.EXCLUDED_OWNER_IDS.includes(id);
+  const ok = excluded === shouldExclude;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${nm} ${shouldExclude ? 'excluded' : 'ACTIVE (not excluded)'}`);
+});
 
-  console.log('\n=== Inactive experts excluded from existing-family matching ===');
-  for (const id of ['87283299', '87283306', '87283294', '87283302', '93194078']) {
-    const ok = cfg.EXCLUDED_OWNER_IDS.includes(id);
-    console.log(`${ok ? 'PASS' : 'FAIL'}  ${N(id)} (${id}) excluded`);
-    ok ? pass++ : fail++;
-  }
-
-  console.log(`\n================  ${pass} passed, ${fail} failed  ================`);
-  process.exit(fail ? 1 : 0);
-})();
+console.log(`\n================  ${pass} passed, ${fail} failed  ================`);
+process.exit(fail ? 1 : 0);

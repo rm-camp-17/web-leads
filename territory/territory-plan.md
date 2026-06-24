@@ -65,6 +65,9 @@ Pasternack, Essex → Risa Goldberg, both already covered by existing ZIP rules)
 
 ## 4. Jump balls → Lindsey Schwimmer
 
+> **Note:** the specifics below are the round-1 design; **§8 (round 2) supersedes** the
+> jump-ball list and state coverage (whole-state owners now absorb VA/OH/MD/etc.; 26 gap states).
+
 Rule: regions a clear active expert already owns stay with that expert; low-density /
 uncovered US regions (mostly sitting on Camp Experts Office today) go to Lindsey.
 
@@ -103,3 +106,41 @@ area-code is not misread as France; jump balls land on Lindsey; inactive experts
   wrong metro expert.
 - No live HubSpot records were modified (per the chosen scope). A reassignment script can be
   prepared separately if you later want to clean genuinely-misrouted US records.
+
+---
+
+## 8. Refinements (round 2)
+
+After walking through it with Riley:
+
+**Whole-state model (new `STATE_ROUTES` layer).** Routing now resolves in this order:
+UWS/Manhattan → 5-digit ZIP → 3-digit ZIP (metro) → **whole-state default** → area code →
+jump ball. So a single-expert state is owned end-to-end (e.g. **all of Virginia → Lindsey
+Binstock**, not just NoVA), while multi-expert states (NY, NJ, PA, FL, IL) keep their ZIP-3
+splits. This shrank the jump-ball pool from 28 states to **26** (and pulled Columbus OH →
+Ashley, Salisbury MD → Mindy, etc. out of the jump balls).
+
+State owners: VA/DC/NC/TX → Binstock · MD → Mindy · DE → Beth · GA/TN/SC/AL → Tami ·
+OH/MI/WI/MN → Ashley · CO/WA/OR → Jaime · CA → Denise · MA/RI → Emily Rothenberg ·
+CT → Amanda (Westport/Greenwich carved to Emily Rothenberg).
+
+**Roster corrected against HubSpot `isActive`:**
+- **Heather Messer is ACTIVE** — was wrongly benched; now in `EXPERTS` with a Rye Brook
+  carve-out (`10573`). *[ASSUMPTION: confirm her exact towns; phone needed for SMS.]*
+- **Michelle Burger is INACTIVE** — her Livingston rule (`07039`) was removed; Livingston now
+  flows to Risa Goldberg (Essex `070`).
+- **Lara Weinberg, Leslie Zeller** inactive (confirmed by HubSpot).
+- **Lisa Dalinka, Julie Rosenberg** treated as inactive per Riley, **but HubSpot still shows
+  them active** — their seats should be deactivated.
+- **Nathalie Amar** + two blank-named seats are active with **0 households** (new/placeholder).
+
+**Monica Hirsch is NOT Westchester.** Her real book is Brazil/São Paulo, Uruguay, Bergen NJ
+(Upper Saddle River) and South Florida — profile corrected to Latin America. (She's a Brazil
+co-expert alongside Carolina Lautenberg — a future split to consider.)
+
+**New England split (from the records):** CT → Amanda + Emily Rothenberg · MA & RI → Emily
+Rothenberg · Boston (`021`) → **Wendy Marks** *[ASSUMPTION: confirm Wendy's NE area]* ·
+NH/VT/ME → Lindsey Schwimmer (genuine low-density gaps).
+
+**Still open / flagged:** Wendy's exact NE area, Heather Messer's full town list + SMS phone,
+and whether Karen Rossow (Mexico route) is active.

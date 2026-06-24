@@ -243,6 +243,20 @@ function getExpertByZip(zip) {
     return { expertId: config.ZIP_ROUTES[prefix3], rule: `zip_prefix_${prefix3}` };
   }
 
+  // Whole-state default (single-expert states) — applied only after metro rules miss.
+  const state = zip3ToState(prefix3);
+  if (state && config.STATE_ROUTES[state]) {
+    return { expertId: config.STATE_ROUTES[state], rule: `state_${state}` };
+  }
+
+  return null;
+}
+
+// Map a 3-digit ZIP prefix to its US state via the SCF allocation table.
+function zip3ToState(prefix3) {
+  const n = parseInt(prefix3, 10);
+  if (Number.isNaN(n)) return null;
+  for (const [a, b, st] of config.ZIP3_STATE_RANGES) if (n >= a && n <= b) return st;
   return null;
 }
 

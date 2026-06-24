@@ -49,6 +49,7 @@ const EXPERTS = {
   '87283295': { name: 'Karen Rossow', email: 'karen.rossow@campexperts.com', phone: null },
   '87283288': { name: 'Fiona Jakobi', email: 'fiona@campexperts.com', phone: '+447850607037' },
   '87283308': { name: 'Melissa Lumaco', email: 'melissa@campexperts.com', phone: '+14242576775' },
+  '93194078': { name: 'Heather Messer', email: 'heather.m@campexperts.com', phone: null }, // Rye Brook / Westchester — phone TBD for SMS
   '86362403': { name: 'Camp Experts Office', email: 'office@campexperts.com', phone: '+12122887892' },
 };
 
@@ -62,12 +63,13 @@ if (process.env.TEST_MODE === 'true') {
 // NOTE: this only changes ROUTING. Existing CRM ownership is left untouched —
 // per Riley, existing families are only re-routed if they resubmit via the website.
 const INACTIVE_OWNER_IDS = [
-  '87283299', // Lara Weinberg — inactive (old territory Bergen/Essex NJ now flows to Dara / Risa via ZIP rules)
-  '87283306', // Lisa Dalinka — inactive ("ignore")
-  '87283294', // Julie Rosenberg — inactive
-  '87283302', // Leslie Zeller — inactive
-  '93194078', // Heather Messer — inactive
+  '87283299', // Lara Weinberg — inactive (HubSpot isActive=false). Bergen/Essex NJ flows to Dara / Risa.
+  '87283302', // Leslie Zeller — inactive (HubSpot isActive=false).
+  '87283310', // Michelle Burger — inactive (HubSpot isActive=false). Livingston NJ now flows to Risa (Essex 070).
+  '87283306', // Lisa Dalinka — treat as inactive per Riley ("ignore"). NOTE: HubSpot still shows isActive=true — deactivate the seat.
+  '87283294', // Julie Rosenberg — treat as inactive per Riley. NOTE: HubSpot still shows isActive=true — deactivate the seat.
 ];
+// (Heather Messer 93194078 is ACTIVE — she gets the Rye Brook carve-out below.)
 
 // Owner IDs to exclude from "existing family" matching:
 // hiring/office buckets + every inactive expert above.
@@ -141,6 +143,7 @@ const EXPERT_SLUGS = {
   'karen-rossow': '87283295',
   'fiona-jakobi': '87283288',
   'melissa-lumaco': '87283308',
+  'heather-messer': '93194078',
 };
 
 // International country → owner ID
@@ -237,7 +240,7 @@ const ZIP_ROUTES = {
   '071': '87283320',
   '07090': '87283297', // Westfield → Lana Ast
   '07040': '87283314', // Maplewood → Natasha Kreizman
-  '07039': '87283310', // Livingston → Michelle Burger
+  // '07039' (Livingston) removed — Michelle Burger inactive; now flows to Essex 070 → Risa Goldberg
 
   // === CONNECTICUT ===
   '068': '87283272',   // Fairfield County → Amanda Rothlein
@@ -442,17 +445,18 @@ const ZIP_ROUTES = {
   '085': '87283293', // Ocean / South-Central NJ → Jennifer Markizon (nearest active book)
   '189': '87283293', // Poconos / NE PA → Jennifer Markizon
 
+  // === NEW ENGLAND co-expert carve-outs (rest of each state set via STATE_ROUTES) ===
+  '021': '87283325', // Greater Boston → Wendy Marks  [ASSUMPTION: confirm Wendy's NE area]
+  '10573': '93194078', // Rye Brook / Port Chester → Heather Messer  [ASSUMPTION: confirm her exact towns]
+
   // === JUMP BALLS → Lindsey Schwimmer ===
-  // Low-density / orphaned US regions with no clear active expert (these were
-  // mostly sitting on Camp Experts Office, or on a now-inactive expert).
-  // The domestic gap fallback below sends every OTHER unmatched US lead here too.
+  // Low-density / orphaned US regions with no clear active expert AND no
+  // whole-state owner. The domestic gap fallback sends every OTHER unmatched
+  // US lead here too. (Worcester/SE-MA and Columbus OH were removed — they now
+  // belong to their state expert: MA → Emily Rothenberg, OH → Ashley Garson.)
   '109': '87283303', // Rockland / Orange County NY (was Lara Weinberg)
-  '020': '87283303', // Eastern MA (Worcester/Framingham)
-  '021': '87283303', // Greater Boston
-  '024': '87283303', // SE Massachusetts
   '080': '87283303', // South Jersey (Camden)
   '088': '87283303', // Central NJ (Trenton fringe)
-  '432': '87283303', // Columbus OH
   '852': '87283303', // Phoenix AZ
   '130': '87283303', // Syracuse NY
 };
@@ -580,6 +584,41 @@ const PHONE_CC_ROUTES = {
   '20': '87283277',  // Egypt → Carrie Fleming
 };
 
+// Whole-state default ownership. Applied AFTER the 5-digit and 3-digit ZIP_ROUTES
+// rules above, so metro carve-outs always win and the rest of a single-expert
+// state still routes to that expert instead of falling to a jump ball.
+// (e.g. NoVA 220-223 → Binstock via ZIP_ROUTES; the rest of Virginia → Binstock here.)
+// Multi-expert states (NY, NJ, PA, FL, IL) are intentionally absent — they stay
+// governed by their ZIP-3 splits. States absent here with no ZIP rule are genuine
+// gaps and fall to the jump-ball owner (Lindsey Schwimmer).
+const STATE_ROUTES = {
+  'VA': '87283304', 'DC': '87283304', 'NC': '87283304', 'TX': '87283304', // Lindsey Binstock
+  'MD': '87283312', // Mindy Rosen
+  'DE': '87283274', // Beth Goldstein
+  'GA': '87283324', 'TN': '87283324', 'SC': '87283324', 'AL': '87283324', // Tami Feldman
+  'OH': '87283273', 'MI': '87283273', 'WI': '87283273', 'MN': '87283273', // Ashley Garson
+  'CO': '87283291', 'WA': '87283291', 'OR': '87283291', // Jaime Altman
+  'CA': '87283281', // Denise Gordon
+  'MA': '87283284', 'RI': '87283284', // Emily Rothenberg (New England core; RI adjacent)
+  'CT': '87283272', // Amanda Rothlein (Fairfield + Hartford; gold-coast towns carved to Emily Rothenberg via ZIP_ROUTES)
+};
+
+// ZIP-3 prefix → US state (USPS SCF allocation). Used only to apply STATE_ROUTES.
+// Each entry: [startPrefix, endPrefix, stateAbbrev].
+const ZIP3_STATE_RANGES = [
+  [10,27,'MA'],[28,29,'RI'],[30,38,'NH'],[39,49,'ME'],[50,59,'VT'],[60,69,'CT'],
+  [70,89,'NJ'],[100,149,'NY'],[150,196,'PA'],[197,199,'DE'],[200,205,'DC'],
+  [206,219,'MD'],[220,246,'VA'],[247,268,'WV'],[270,289,'NC'],[290,299,'SC'],
+  [300,319,'GA'],[398,399,'GA'],[320,349,'FL'],[350,369,'AL'],[370,385,'TN'],
+  [386,397,'MS'],[400,427,'KY'],[430,459,'OH'],[460,479,'IN'],[480,499,'MI'],
+  [500,528,'IA'],[530,549,'WI'],[550,567,'MN'],[570,577,'SD'],[580,588,'ND'],
+  [590,599,'MT'],[600,629,'IL'],[630,658,'MO'],[660,679,'KS'],[680,693,'NE'],
+  [700,714,'LA'],[716,729,'AR'],[730,749,'OK'],[750,799,'TX'],[800,816,'CO'],
+  [820,831,'WY'],[832,838,'ID'],[840,847,'UT'],[850,865,'AZ'],[870,884,'NM'],
+  [889,898,'NV'],[900,961,'CA'],[967,968,'HI'],[970,979,'OR'],[980,994,'WA'],
+  [995,999,'AK'],
+];
+
 // HubSpot custom object IDs
 const HUBSPOT_CHILD_OBJECT_ID = '2-50911061';
 const HUBSPOT_HOUSEHOLD_OBJECT_ID = '2-53610744';
@@ -590,7 +629,7 @@ const EXPERT_PROFILES = {
   '87283296': { regions: ['South Florida', 'Miami-Dade', 'Aventura', 'Hollywood FL'], specialty: 'South Florida families, Turkish expats' },
   '87283278': { regions: ['France', 'Spain', 'Germany', 'Central Europe'], specialty: 'European families, French-speaking' },
   '87283274': { regions: ['Philadelphia', 'Delaware', 'Central PA', 'UWS Manhattan'], specialty: 'Philadelphia metro, Delaware, Lehigh Valley' },
-  '87283313': { regions: ['Westchester NY'], specialty: 'Westchester County families' },
+  '87283313': { regions: ['Brazil', 'Uruguay', 'Latin America', 'Bergen County NJ', 'South Florida'], specialty: 'Latin American families (Brazil/Uruguay), some Bergen NJ & South FL' },
   '87283276': { regions: ['South America', 'Latin America', 'Argentina', 'Brazil'], specialty: 'Latin American families, Spanish-speaking' },
   '87283325': { regions: ['Manhattan'], specialty: 'Manhattan families (rotation)' },
   '87283267': { regions: ['Manhattan'], specialty: 'Manhattan families (rotation)' },
@@ -624,6 +663,7 @@ const EXPERT_PROFILES = {
   '87283289': { regions: ['Suffolk County', 'Long Island'], specialty: 'Suffolk County, Eastern Long Island' },
   '87283281': { regions: ['California', 'Los Angeles', 'San Francisco', 'Bay Area'], specialty: 'All of California' },
   '87283303': { regions: ['Cooper City FL', 'Pembroke Pines', 'Southwest Broward', 'National gap coverage'], specialty: 'Southwest Broward County; jump-ball / national gap coverage for low-density & uncovered US areas' },
+  '93194078': { regions: ['Rye Brook NY', 'Port Chester', 'Westchester'], specialty: 'Rye Brook / eastern Westchester' },
   '87283268': { regions: ['Chicago city'], specialty: 'City of Chicago proper' },
   '87283310': { regions: ['Livingston NJ'], specialty: 'Livingston NJ area' },
 };
@@ -643,6 +683,8 @@ module.exports = {
   INTERNATIONAL_ROUTES,
   INTERNATIONAL_FALLBACK,
   ZIP_ROUTES,
+  STATE_ROUTES,
+  ZIP3_STATE_RANGES,
   AREA_CODE_ROUTES,
   PHONE_CC_ROUTES,
   EXPERT_PROFILES,
